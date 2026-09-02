@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "id": "flowfocus",
+  "name": "flowfocus",
+  "version": "1.0.0",
+  "author": "kamal",
+  "description": "Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "flowfocus",
+    "description": "Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
+    "category": "Productivity",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "workSec": 1500,
+      "shortBreakSec": 300,
+      "longBreakSec": 900,
+      "longBreakInterval": 4,
+      "tickEnabled": false,
+      "tickVolume": 0.3,
+      "kanbanMode": false,
+      "autoStartBreaks": false,
+      "autoStartWork": false,
+      "notificationsEnabled": true
+    },
+    "schema": [
+      {
+        "key": "workSec",
+        "type": "int",
+        "label": "Work duration (seconds)"
+      },
+      {
+        "key": "shortBreakSec",
+        "type": "int",
+        "label": "Short break (seconds)"
+      },
+      {
+        "key": "longBreakSec",
+        "type": "int",
+        "label": "Long break (seconds)"
+      },
+      {
+        "key": "longBreakInterval",
+        "type": "int",
+        "label": "Cycles before long break"
+      },
+      {
+        "key": "tickEnabled",
+        "type": "bool",
+        "label": "Tick sound while running"
+      },
+      {
+        "key": "tickVolume",
+        "type": "real",
+        "label": "Tick volume (0.0-1.0)"
+      },
+      {
+        "key": "kanbanMode",
+        "type": "bool",
+        "label": "Use kanban board instead of plain list"
+      },
+      {
+        "key": "autoStartBreaks",
+        "type": "bool",
+        "label": "Auto-start breaks"
+      },
+      {
+        "key": "autoStartWork",
+        "type": "bool",
+        "label": "Auto-start next work session"
+      },
+      {
+        "key": "notificationsEnabled",
+        "type": "bool",
+        "label": "Desktop notifications on phase end"
+      }
+    ]
+  }
+}
