@@ -202,6 +202,14 @@ BarWidget {
   }
 
   function deleteTask(id) {
+    // if task was pushed to vault, remove it there too (per-profile file, keeps vault in sync)
+    var task = null
+    for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
+    if (task && task.pushedToObsidian) {
+      var prof = Model.getProfileById(root.state, task.profileId || "default")
+      var profName = prof ? prof.name : (task.profileId || "Default")
+      Model.removeTaskFromVault(root.pluginDir, root.state.settings, task, undefined, profName)
+    }
     root.state = Model.deleteTask(root.state, id)
     root.saveState()
     root.applyTickState()
@@ -209,6 +217,24 @@ BarWidget {
 
   function moveTask(id, column) {
     root.state = Model.moveTask(root.state, id, column)
+    root.saveState()
+    root.applyTickState()
+  }
+
+  function moveTaskUp(id) {
+    root.state = Model.moveTaskUp(root.state, id)
+    root.saveState()
+    root.applyTickState()
+  }
+
+  function moveTaskDown(id) {
+    root.state = Model.moveTaskDown(root.state, id)
+    root.saveState()
+    root.applyTickState()
+  }
+
+  function cycleProfile(dir) {
+    root.state = Model.cycleKanbanProfile(root.state, dir)
     root.saveState()
     root.applyTickState()
   }
@@ -225,38 +251,83 @@ BarWidget {
     root.applyTickState()
   }
 
+  function setActiveProfile(id) {
+    root.state = Model.setActiveKanbanProfile(root.state, id)
+    root.saveState()
+    root.applyTickState()
+  }
+
+  function createProfile(name) {
+    root.state = Model.createKanbanProfile(root.state, name)
+    root.saveState()
+    root.applyTickState()
+  }
+
+  function renameProfile(id, name) {
+    root.state = Model.renameKanbanProfile(root.state, id, name)
+    root.saveState()
+    root.applyTickState()
+  }
+
+  function deleteProfile(id) {
+    root.state = Model.deleteKanbanProfile(root.state, id)
+    root.saveState()
+    root.applyTickState()
+  }
+
   function pushTaskToObsidian(id) {
     var task = null
     for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
     if (!task) return false
-    // allow re-push if column changed (e.g. todo → done) so Done becomes [x] after being pushed as [ ]
     if (task.pushedToObsidian && task.pushedColumn === task.column) {
-      Model.sendNotification(root.state, "Already pushed", task.text.slice(0,60) + " ✓ [" + task.column + "]")
+      Model.sendNotification(root.state, "Already pushed", task.text.slice(0,60) + " ✓ [" + task.column + "] — click ↩ to undo")
       return false
     }
-    var ok = Model.appendTaskToVault(root.pluginDir, root.state.settings, task)
+    var prof = Model.getProfileById(root.state, task.profileId || "default")
+    var profName = prof ? prof.name : (task.profileId || "Default")
+    var ok = Model.appendTaskToVault(root.pluginDir, root.state.settings, task, undefined, profName)
     if (ok) {
       root.state = Model.markTaskPushed(root.state, id)
       root.saveState()
       root.applyTickState()
-      Model.sendNotification(root.state, "Pushed to Obsidian ✓", task.text.slice(0,60))
+      Model.sendNotification(root.state, "Pushed to Obsidian ✓", task.text.slice(0,60) + " [" + task.column + "] → " + profName)
     } else {
       Model.sendNotification(root.state, "Obsidian not configured", "Set vault path in Settings")
     }
     return ok
   }
 
+  function undoPushToObsidian(id) {
+    var task = null
+    for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
+    if (!task || !task.pushedToObsidian) return false
+    var prof = Model.getProfileById(root.state, task.profileId || "default")
+    var profName = prof ? prof.name : (task.profileId || "Default")
+    var ok = Model.removeTaskFromVault(root.pluginDir, root.state.settings, task, undefined, profName)
+    if (ok) {
+      root.state = Model.clearTaskPushed(root.state, id)
+      root.saveState()
+      root.applyTickState()
+      Model.sendNotification(root.state, "Removed from Obsidian ↩", task.text.slice(0,60))
+    }
+    return ok
+  }
+
   function pushAllDoneToObsidian() {
-    // pushes any not-yet-pushed tasks, or tasks whose column changed since last push (e.g. todo [ ] → done [x])
-    var pending = root.state.tasks.filter(function(t){ return !t.pushedToObsidian || t.pushedColumn !== t.column })
+    // pushes pending tasks for active profile, per-profile file
+    var activeId = Model.getActiveProfileId(root.state)
+    var activeProf = Model.getProfileById(root.state, activeId)
+    var profName = activeProf ? activeProf.name : activeId
+    var pending = Model.tasksForProfile(root.state, activeId).filter(function(t){ return !t.pushedToObsidian || t.pushedColumn !== t.column })
     if (pending.length === 0) {
-      if (root.state.tasks.length > 0) Model.sendNotification(root.state, "All tasks already pushed ✓", "")
+      var all = Model.tasksForProfile(root.state, activeId)
+      if (all.length > 0) Model.sendNotification(root.state, "All tasks already pushed ✓", "")
       else Model.sendNotification(root.state, "Nothing to push", "No tasks")
       return 0
     }
     var count = 0
     for (var i = 0; i < pending.length; i++) {
-      if (Model.appendTaskToVault(root.pluginDir, root.state.settings, pending[i])) {
+      if (Model.appendTaskToVault(root.pluginDir, root.state.settings, pending[i], undefined, profName)) {
         root.state = Model.markTaskPushed(root.state, pending[i].id)
         count++
       }
@@ -339,8 +410,8 @@ BarWidget {
     verticalPadding: 8.75
     fixedWidth: !root.vertical && !root.isStopped ? (runningContent.implicitWidth + 10) : -1
     tooltipText: root.isStopped
-      ? "FocusFlow — click to open"
-      : Model.phaseLabel(root.phase) + (root.activeTask ? " — " + root.activeTask.text : "")
+      ? "FocusFlow"
+      : Model.phaseLabel(root.phase) + (root.activeTask ? " - " + root.activeTask.text : "")
 
     onPressed: function(b) {
       if (b === Qt.RightButton) root.toggleTimer()

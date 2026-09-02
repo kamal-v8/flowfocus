@@ -45,14 +45,41 @@ Panel {
   }
   readonly property var nextUp: Model.nextTask(state)
   readonly property bool kanbanMode: ffSettings.kanbanMode === true
+  readonly property string activeProfileId: state.activeKanbanProfileId || "default"
+  readonly property var profiles: state.kanbanProfiles || []
+  readonly property var activeProfile: Model.getActiveProfile(state)
 
   // ---- UI state ----
   property string newTaskText: ""
+  property string newProfileName: ""
   property bool settingsVisible: false
+  property bool showProfileCreator: false
+
+  // Alt+H / Alt+L to cycle kanban profiles when FocusFlow is focused
+  Shortcut {
+    sequence: "Alt+H"
+    enabled: panel.open && root.kanbanMode
+    onActivated: root.ff.cycleProfile(-1)
+  }
+  Shortcut {
+    sequence: "Alt+L"
+    enabled: panel.open && root.kanbanMode
+    onActivated: root.ff.cycleProfile(1)
+  }
+  Shortcut {
+    sequence: "Alt+h"
+    enabled: panel.open && root.kanbanMode
+    onActivated: root.ff.cycleProfile(-1)
+  }
+  Shortcut {
+    sequence: "Alt+l"
+    enabled: panel.open && root.kanbanMode
+    onActivated: root.ff.cycleProfile(1)
+  }
 
   // ---- Layout ----
   readonly property int basePanelWidth: Style.space(340)
-  readonly property int kanbanPanelWidth: Style.space(520)
+  readonly property int kanbanPanelWidth: Style.space(580)
   readonly property int panelWidth: root.kanbanMode ? kanbanPanelWidth : basePanelWidth
 
   // Ultra-compact toggle — dense row (32px) without BorderSurface card chrome
@@ -129,6 +156,7 @@ Panel {
       anchors.fill: parent
       anchors.topMargin: Style.space(4)
       spacing: Style.space(4)
+      clip: true
 
       // breathing room so progress ring doesn't clip card border
       Item { width: parent.width; height: Style.space(4) }
@@ -191,8 +219,8 @@ Panel {
 
         Column {
           anchors.verticalCenter: parent.verticalCenter
-          spacing: 2
-          width: parent.width - timerRingSlot.width - gearBtn.width - Style.spacing.controlPaddingX * 2
+          spacing: 1
+          width: root.panelWidth >= 500 ? 140 : 92
 
           Text {
             text: Model.phaseLabel(root.phase)
@@ -220,6 +248,65 @@ Panel {
           }
         }
 
+        // Compact unique control box — beside timer (not far right), separate and boxed
+        Rectangle {
+          id: controlBox
+          width: root.panelWidth >= 500 ? 176 : 148
+          height: 34
+          radius: Style.cornerRadius
+          color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.08)
+          border.color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
+          border.width: 1
+          anchors.verticalCenter: parent.verticalCenter
+
+          Row {
+            anchors.centerIn: parent
+            spacing: root.panelWidth >= 500 ? Style.space(2) : Style.space(1)
+            Button {
+              text: root.isRunning ? "Pause" : (root.isPaused ? "Resume" : "Start")
+              foreground: Color.accent
+              fontSize: Style.font.caption
+              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: root.ff.toggleTimer()
+            }
+            Button {
+              text: "Reset"
+              foreground: Color.muted
+              fontSize: Style.font.caption
+              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: root.ff.resetTimer()
+            }
+            Button {
+              text: "Skip"
+              foreground: Color.muted
+              fontSize: Style.font.caption
+              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: root.ff.skipPhase()
+            }
+            Button {
+              text: root.kanbanMode ? "Board" : "List"
+              foreground: root.kanbanMode ? Color.accent : Color.muted
+              fontSize: Style.font.caption
+              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: {
+                root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
+                root.ff.saveState()
+                root.ff.applyTickState()
+              }
+            }
+          }
+        }
+
+        // Spacer keeps gear at far right while box stays beside timer
+        Item {
+          width: Math.max(0, parent.width - timerRingSlot.width - (root.panelWidth >= 500 ? 140 : 92) - controlBox.width - gearBtn.width - Style.spacing.controlPaddingX * 4)
+          height: 1
+        }
+
         // Settings gear icon
         Button {
           id: gearBtn
@@ -228,50 +315,6 @@ Panel {
           onClicked: root.settingsVisible = !root.settingsVisible
           anchors.verticalCenter: parent.verticalCenter
         }
-      }
-
-      // ---- Timer controls ----
-      Row {
-        width: parent.width
-        spacing: Style.spacing.controlPaddingX
-
-        Button {
-          text: root.isRunning ? "Pause" : (root.isPaused ? "Resume" : "Start")
-          foreground: Color.accent
-          onClicked: root.ff.toggleTimer()
-        }
-
-        Button {
-          text: "Reset"
-          foreground: Color.muted
-          onClicked: root.ff.resetTimer()
-        }
-
-        Button {
-          text: "Skip"
-          foreground: Color.muted
-          onClicked: root.ff.skipPhase()
-        }
-
-        // Kanban toggle — quick access in the timer row
-        Button {
-          text: root.kanbanMode ? "Board" : "List"
-          foreground: root.kanbanMode ? Color.accent : Color.muted
-          onClicked: {
-            root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
-            root.ff.saveState()
-            root.ff.applyTickState()
-          }
-        }
-      }
-
-      // ---- Cycle info ----
-      Text {
-        text: "Cycle " + (Math.floor(root.timer.completedWorkPhases / root.ffSettings.longBreakInterval) + 1) +
-              " — " + root.timer.completedWorkPhases + " pomodoros done"
-        color: Color.muted
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
       }
 
       PanelSeparator {}
@@ -428,13 +471,14 @@ Panel {
             Button {
               text: "Push all"
               foreground: Color.accent
-              enabled: (root.state.tasks.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length > 0) && !!root.ffSettings.obsidianVaultPath
+              enabled: (Model.tasksForProfile(root.state, root.activeProfileId).filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length > 0) && !!root.ffSettings.obsidianVaultPath
               onClicked: root.ff.pushAllDoneToObsidian()
             }
             Text {
               text: {
-                var pending = root.state.tasks.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length
-                var total = root.state.tasks.length
+                var all = Model.tasksForProfile(root.state, root.activeProfileId)
+                var pending = all.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length
+                var total = all.length
                 if (!root.ffSettings.obsidianVaultPath) return "set vault path"
                 if (pending === 0 && total > 0) return "all pushed ✓ · " + (root.ffSettings.obsidianFile || "FlowFocus.md")
                 return pending + "/" + total + " pending · " + (root.ffSettings.obsidianFile || "FlowFocus.md")
@@ -454,7 +498,155 @@ Panel {
 
       // ---- Tasks section ----
       PanelSectionHeader {
-        text: root.kanbanMode ? "Kanban" : "Tasks"
+        text: root.kanbanMode ? ("Kanban — " + (root.activeProfile ? root.activeProfile.name : "Default")) : "Tasks"
+      }
+
+      // Kanban profiles — switchboard for project spaces, heading differentiated
+      Column {
+        visible: root.kanbanMode
+        width: parent.width
+        spacing: Style.space(3)
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.controlPaddingX
+
+          Text {
+            text: "Spaces:"
+            color: Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+          }
+
+          Flickable {
+            width: parent.width - 52 - addProfileBtn.width - Style.spacing.controlPaddingX*2
+            height: 28
+            contentWidth: profileRow.implicitWidth
+            contentHeight: 28
+            clip: true
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+
+            Row {
+              id: profileRow
+              spacing: Style.space(4)
+              anchors.verticalCenter: parent.verticalCenter
+
+              Repeater {
+                model: root.profiles
+                delegate: Button {
+                  required property var modelData
+                  property var profile: modelData
+                  text: profile.name
+                  foreground: profile.id === root.activeProfileId ? Color.accent : Color.muted
+                  fontSize: Style.font.caption
+                  horizontalPadding: Style.space(4)
+                  verticalPadding: Style.space(2)
+                  onClicked: root.ff.setActiveProfile(profile.id)
+                }
+              }
+            }
+          }
+
+          Button {
+            id: addProfileBtn
+            text: "+"
+            foreground: Color.accent
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(4)
+            verticalPadding: Style.space(2)
+            onClicked: root.showProfileCreator = !root.showProfileCreator
+          }
+        }
+
+        Column {
+          width: parent.width
+          spacing: Style.space(2)
+          visible: root.showProfileCreator
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.controlPaddingX
+
+            TextField {
+              id: profileInput
+              width: parent.width - createBtn.width - cancelBtn.width - Style.spacing.controlPaddingX*2
+              placeholderText: "New space name…"
+              text: root.newProfileName
+              maximumLength: 30
+              onTextChanged: root.newProfileName = text.slice(0,30)
+              onAccepted: {
+                if (root.newProfileName.trim()) {
+                  root.ff.createProfile(root.newProfileName.trim())
+                  root.newProfileName = ""
+                  profileInput.text = ""
+                  root.showProfileCreator = false
+                }
+              }
+            }
+
+            Button {
+              id: createBtn
+              text: "Create"
+              foreground: Color.accent
+              fontSize: Style.font.caption
+              enabled: root.newProfileName.trim().length > 0
+              onClicked: {
+                root.ff.createProfile(root.newProfileName.trim())
+                root.newProfileName = ""
+                profileInput.text = ""
+                root.showProfileCreator = false
+              }
+            }
+
+            Button {
+              id: cancelBtn
+              text: "✕"
+              foreground: Color.muted
+              fontSize: Style.font.caption
+              onClicked: { root.showProfileCreator = false; root.newProfileName = ""; profileInput.text = "" }
+            }
+          }
+
+          Row {
+            width: parent.width
+            spacing: Style.spacing.controlPaddingX
+            visible: root.activeProfile && root.activeProfile.id !== "default"
+
+            Text {
+              text: "Space: " + (root.activeProfile ? root.activeProfile.name : "")
+              color: Color.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              anchors.verticalCenter: parent.verticalCenter
+              elide: Text.ElideRight
+              width: parent.width - renameBtn.width - deleteProfileBtn.width - parent.spacing*2
+            }
+
+            Button {
+              id: renameBtn
+              text: "Rename"
+              foreground: Color.accent
+              fontSize: Style.font.caption
+              enabled: root.newProfileName.trim().length > 0
+              onClicked: {
+                root.ff.renameProfile(root.activeProfileId, root.newProfileName.trim() || root.activeProfile.name)
+                root.newProfileName = ""
+                profileInput.text = ""
+              }
+            }
+
+            Button {
+              id: deleteProfileBtn
+              text: "Delete"
+              foreground: Color.urgent
+              fontSize: Style.font.caption
+              onClicked: confirmDeleteProfile.opened = true
+            }
+          }
+        }
       }
 
       Text {
@@ -477,7 +669,7 @@ Panel {
         width: parent.width
       }
 
-      // New task input
+      // New task input — scoped to active profile heading
       Row {
         width: parent.width
         spacing: Style.spacing.controlPaddingX
@@ -485,7 +677,7 @@ Panel {
         TextField {
           id: taskInput
           width: parent.width - addButton.implicitWidth - Style.spacing.controlPaddingX
-          placeholderText: "Add a task..."
+          placeholderText: root.kanbanMode && root.activeProfile ? ("Add to " + root.activeProfile.name + "…") : "Add a task..."
           text: root.newTaskText
           maximumLength: 200
           onTextChanged: root.newTaskText = text.slice(0, 200)
@@ -504,9 +696,10 @@ Panel {
       Item {
         width: parent.width
         height: root.kanbanMode ? kanbanContainer.height : plainList.height
-        implicitHeight: root.kanbanMode ? kanbanContainer.implicitHeight : plainList.implicitHeight
+        implicitHeight: height
+        clip: true
 
-        // Plain list mode — vertical scroll when many tasks (cap so panel doesn't blow tall)
+        // Plain list mode — vertical scroll when many tasks (cap so panel doesn't blow tall) — scoped to active profile
         ListView {
           id: plainList
           visible: !root.kanbanMode
@@ -515,10 +708,11 @@ Panel {
           interactive: true
           clip: true
           boundsBehavior: Flickable.StopAtBounds
-          model: root.state.tasks
+          model: Model.tasksForProfile(root.state, root.activeProfileId)
           spacing: 4
 
           delegate: Rectangle {
+            id: plainDelegate
             width: plainList.width
             height: taskRow.implicitHeight + Style.space(4)
             radius: Style.cornerRadius / 2
@@ -528,6 +722,8 @@ Panel {
 
             required property var modelData
             property var task: modelData
+            property bool isHovered: false
+            HoverHandler { id: plainHover; onHoveredChanged: plainDelegate.isHovered = hovered }
 
             Row {
               id: taskRow
@@ -535,7 +731,7 @@ Panel {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               anchors.leftMargin: Style.space(2)
-              anchors.rightMargin: Style.space(2)
+              anchors.rightMargin: Style.space(6) // reserve for top-corner delete
               spacing: Style.spacing.controlPaddingX
 
               // Custom checkbox — avoids broken QtQuick.Controls CheckBox styling
@@ -574,7 +770,7 @@ Panel {
                 font.strikeout: task.done
                 elide: Text.ElideRight
                 wrapMode: Text.NoWrap
-                width: parent.width - checkBox.width - focusBtn.width - moveBtn.width - vaultBtn.width - delBtn.width - parent.spacing * 5
+                width: parent.width - checkBox.width - focusBtn.width - moveBtn.width - vaultBtn.width - upBtn.width - downBtn.width - parent.spacing * 5
                 anchors.verticalCenter: parent.verticalCenter
               }
 
@@ -594,12 +790,48 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
               }
 
-              // Vault push — any column, manual approve; shows ✓ when already pushed in this column (re-push allowed after moving to Done)
+              // Hover-only up/down to prioritize (1st) — visible only when hovered
+              Text {
+                id: upBtn
+                visible: plainDelegate.isHovered
+                text: "▲"
+                color: Color.muted
+                font.pixelSize: Style.font.caption
+                width: visible ? 14 : 0
+                horizontalAlignment: Text.AlignHCenter
+                anchors.verticalCenter: parent.verticalCenter
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -4
+                  cursorShape: Qt.PointingHandCursor
+                  enabled: parent.visible
+                  onClicked: root.ff.moveTaskUp(task.id)
+                }
+              }
+              Text {
+                id: downBtn
+                visible: plainDelegate.isHovered
+                text: "▼"
+                color: Color.muted
+                font.pixelSize: Style.font.caption
+                width: visible ? 14 : 0
+                horizontalAlignment: Text.AlignHCenter
+                anchors.verticalCenter: parent.verticalCenter
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -4
+                  cursorShape: Qt.PointingHandCursor
+                  enabled: parent.visible
+                  onClicked: root.ff.moveTaskDown(task.id)
+                }
+              }
+
+              // Vault push — any column, manual approve; ✓ becomes ↩ to undo (removes from vault + clears flag)
               Text {
                 id: vaultBtn
                 visible: root.ffSettings.obsidianEnabled === true
-                text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "✓" : "⬆"
-                color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.muted : Color.accent
+                text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "↩" : "⬆"
+                color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.urgent : Color.accent
                 font.pixelSize: Style.font.body
                 font.bold: true
                 width: visible ? 18 : 0
@@ -608,18 +840,33 @@ Panel {
                 MouseArea {
                   anchors.fill: parent
                   anchors.margins: -4
-                  cursorShape: (task.pushedToObsidian && task.pushedColumn === task.column) ? Qt.ArrowCursor : Qt.PointingHandCursor
-                  enabled: parent.visible && !(task.pushedToObsidian && task.pushedColumn === task.column)
-                  onClicked: root.ff.pushTaskToObsidian(task.id)
+                  cursorShape: Qt.PointingHandCursor
+                  enabled: parent.visible
+                  onClicked: {
+                    if (task.pushedToObsidian && task.pushedColumn === task.column) root.ff.undoPushToObsidian(task.id)
+                    else root.ff.pushTaskToObsidian(task.id)
+                  }
                 }
               }
-
-              Button {
-                id: delBtn
-                text: "✕"
-                foreground: Color.urgent
-                onClicked: root.ff.deleteTask(task.id)
-                anchors.verticalCenter: parent.verticalCenter
+            }
+            // – at right-hand top corner to remove task — asks Yes/No before removing
+            Text {
+              text: "-"
+              color: Color.urgent
+              font.pixelSize: 12
+              font.bold: true
+              z: 10
+              anchors.right: parent.right
+              anchors.top: parent.top
+              anchors.rightMargin: 6
+              anchors.topMargin: 2
+              MouseArea {
+                anchors.fill: parent
+                anchors.margins: -6
+                z: 10
+                cursorShape: Qt.PointingHandCursor
+                preventStealing: true
+                onClicked: { confirmDeleteTask.taskId = task.id; confirmDeleteTask.taskText = task.text; confirmDeleteTask.opened = true }
               }
             }
           }
@@ -640,7 +887,7 @@ Panel {
 
           Row {
             id: kanbanRow
-            spacing: Style.space(4)
+            spacing: Style.space(12)
 
             Repeater {
               model: Model.COLUMNS
@@ -649,21 +896,42 @@ Panel {
                 required property string modelData
                 property string colId: modelData
 
-                width: 124
-                spacing: Style.space(3)
+                width: 132
+                spacing: Style.space(8)
 
-                Text {
-                  text: Model.COLUMN_LABELS[colId] + " (" + Model.tasksByColumn(root.state, colId).length + ")"
-                  color: Color.muted
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                  font.bold: true
+                // Header with pill count — more breathing room
+                Row {
+                  width: parent.width
+                  spacing: Style.space(4)
+                  Text {
+                    text: Model.COLUMN_LABELS[colId]
+                    color: Color.muted
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+                  Rectangle {
+                    width: countText.implicitWidth + Style.space(6)
+                    height: Style.space(12)
+                    radius: height/2
+                    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.12)
+                    Text {
+                      id: countText
+                      anchors.centerIn: parent
+                      text: String(Model.tasksByColumn(root.state, colId).length)
+                      color: Color.muted
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption - 1
+                      font.bold: true
+                    }
+                  }
                 }
+                Rectangle { width: parent.width; height: 1; color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.10); radius: 1 }
 
                 // Per-column vertical scroll so todo with 20+ cards isn't invisible beyond 180px cap
                 Flickable {
                   width: parent.width
-                  height: Math.min(colTasks.implicitHeight, Style.space(root.settingsVisible ? 150 : 240))
+                  height: Math.min(colTasks.implicitHeight, Style.space(root.settingsVisible ? 150 : 260))
                   contentHeight: colTasks.implicitHeight
                   contentWidth: width
                   clip: true
@@ -673,38 +941,70 @@ Panel {
                   Column {
                     id: colTasks
                     width: parent.width
-                    spacing: 4
+                    spacing: 8
 
                     Repeater {
                       model: Model.tasksByColumn(root.state, colId)
 
                   delegate: Rectangle {
+                    id: kanbanCard
                     required property var modelData
                     property var task: modelData
+                    property bool isHovered: false
                     width: parent.width
-                    height: taskCardCol.implicitHeight + Style.space(4)
+                    height: taskCardCol.implicitHeight + Style.space(6)
                     radius: Style.cornerRadius
-                    color: task.id === root.timer.activeTaskId ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.12) : Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.06)
-                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.15)
+                    clip: true
+                    color: task.id === root.timer.activeTaskId ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 0.04)
+                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.14)
                     border.width: task.id === root.timer.activeTaskId ? 1.5 : 1
+                    HoverHandler { id: kanbanHover; onHoveredChanged: kanbanCard.isHovered = hovered }
+
+                    // Left accent for active task — stable, not floating
+                    Rectangle {
+                      visible: task.id === root.timer.activeTaskId
+                      width: 3
+                      anchors.left: parent.left
+                      anchors.top: parent.top
+                      anchors.bottom: parent.bottom
+                      color: Color.accent
+                      radius: 1
+                    }
 
                     Column {
                       id: taskCardCol
                       anchors.fill: parent
-                      anchors.margins: Style.space(2)
-                      spacing: 2
+                      anchors.margins: Style.space(4)
+                      anchors.leftMargin: task.id === root.timer.activeTaskId ? Style.space(6) : Style.space(4)
+                      anchors.topMargin: Style.space(5) // reserve for top-right delete
+                      anchors.rightMargin: Style.space(4)
+                      spacing: 6
 
-                      Text {
-                        text: task.text
-                        color: Color.popups.text
-                        font.family: Style.font.family
-                        font.pixelSize: Style.font.bodySmall
-                        wrapMode: Text.Wrap
-                        width: parent.width
+                      Row {
+                        width: parent.width - 14 // reserve for top-right delete
+                        spacing: 4
+                        Text {
+                          visible: task.id === root.timer.activeTaskId
+                          text: "●"
+                          color: Color.accent
+                          font.pixelSize: Style.font.bodySmall
+                          font.bold: true
+                          anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                          text: task.text
+                          color: task.id === root.timer.activeTaskId ? Color.accent : Color.popups.text
+                          font.family: Style.font.family
+                          font.pixelSize: Style.font.bodySmall
+                          font.bold: task.id === root.timer.activeTaskId
+                          wrapMode: Text.Wrap
+                          width: parent.width - (task.id === root.timer.activeTaskId ? 12 : 0)
+                        }
                       }
 
                       Row {
-                        spacing: 4
+                        spacing: 6
+                        anchors.left: parent.left
 
                         Text {
                           visible: root.ffSettings.showPomodoros !== false
@@ -713,80 +1013,125 @@ Panel {
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption
                         }
-
-                        Text {
-                          visible: task.id === root.timer.activeTaskId
-                          text: "●"
-                          color: Color.accent
-                          font.pixelSize: Style.font.caption
-                        }
                       }
 
                       Item {
                         width: parent.width
                         height: 22
+                        clip: true
 
                         Row {
                           id: kanbanMoveRow
-                          spacing: 4
+                          spacing: 6
                           anchors.left: parent.left
                           anchors.verticalCenter: parent.verticalCenter
 
-                          Button {
+                          Text {
                             text: "←"
-                            foreground: colId === "backlog" ? Color.muted : Color.accent
-                            enabled: colId !== "backlog"
-                            onClicked: {
-                              var idx = Model.COLUMNS.indexOf(colId)
-                              if (idx > 0) root.ff.moveTask(task.id, Model.COLUMNS[idx - 1])
+                            color: colId === "backlog" ? Color.muted : Color.accent
+                            font.pixelSize: Style.font.body
+                            opacity: colId === "backlog" ? 0.35 : 1
+                            MouseArea {
+                              anchors.fill: parent
+                              anchors.margins: -4
+                              cursorShape: colId === "backlog" ? Qt.ArrowCursor : Qt.PointingHandCursor
+                              enabled: colId !== "backlog"
+                              onClicked: {
+                                var idx = Model.COLUMNS.indexOf(colId)
+                                if (idx > 0) root.ff.moveTask(task.id, Model.COLUMNS[idx - 1])
+                              }
                             }
                           }
 
-                          Button {
+                          Text {
                             text: "→"
-                            foreground: colId === "done" ? Color.muted : Color.accent
-                            enabled: colId !== "done"
-                            onClicked: {
-                              var idx = Model.COLUMNS.indexOf(colId)
-                              if (idx < Model.COLUMNS.length - 1) root.ff.moveTask(task.id, Model.COLUMNS[idx + 1])
+                            color: colId === "done" ? Color.muted : Color.accent
+                            font.pixelSize: Style.font.body
+                            opacity: colId === "done" ? 0.35 : 1
+                            MouseArea {
+                              anchors.fill: parent
+                              anchors.margins: -4
+                              cursorShape: colId === "done" ? Qt.ArrowCursor : Qt.PointingHandCursor
+                              enabled: colId !== "done"
+                              onClicked: {
+                                var idx = Model.COLUMNS.indexOf(colId)
+                                if (idx < Model.COLUMNS.length - 1) root.ff.moveTask(task.id, Model.COLUMNS[idx + 1])
+                              }
                             }
                           }
                         }
 
-                        // Vault push — any column, manual approve; shows ✓ when already pushed in this column (re-push allowed after moving to Done)
+                        // Hover-only up/down to prioritize — visible only when hovered
+                        Row {
+                          visible: kanbanCard.isHovered
+                          spacing: 4
+                          anchors.centerIn: parent
+                          Text {
+                            text: "▲"
+                            color: Color.muted
+                            font.pixelSize: Style.font.caption
+                            MouseArea {
+                              anchors.fill: parent
+                              anchors.margins: -4
+                              cursorShape: Qt.PointingHandCursor
+                              onClicked: root.ff.moveTaskUp(task.id)
+                            }
+                          }
+                          Text {
+                            text: "▼"
+                            color: Color.muted
+                            font.pixelSize: Style.font.caption
+                            MouseArea {
+                              anchors.fill: parent
+                              anchors.margins: -4
+                              cursorShape: Qt.PointingHandCursor
+                              onClicked: root.ff.moveTaskDown(task.id)
+                            }
+                          }
+                        }
+
+                        // Vault push — any column, manual approve; ↩ undoes (removes from vault + clears flag)
                         Text {
                           visible: root.ffSettings.obsidianEnabled === true
-                          text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "✓" : "⬆"
-                          color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.muted : Color.accent
+                          text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "↩" : "⬆"
+                          color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.urgent : Color.accent
                           font.pixelSize: Style.font.body
                           font.bold: true
                           anchors.right: parent.right
-                          anchors.rightMargin: 18
-                          anchors.verticalCenter: parent.verticalCenter
-                          MouseArea {
-                            anchors.fill: parent
-                            anchors.margins: -6
-                            cursorShape: (task.pushedToObsidian && task.pushedColumn === task.column) ? Qt.ArrowCursor : Qt.PointingHandCursor
-                            enabled: parent.visible && !(task.pushedToObsidian && task.pushedColumn === task.column)
-                            onClicked: root.ff.pushTaskToObsidian(task.id)
-                          }
-                        }
-                        // X = delete task (kanban) — anchored right, not overflowing
-                        Text {
-                          text: "✕"
-                          color: Color.urgent
-                          font.pixelSize: Style.font.body
-                          anchors.right: parent.right
                           anchors.rightMargin: 2
                           anchors.verticalCenter: parent.verticalCenter
-
                           MouseArea {
                             anchors.fill: parent
                             anchors.margins: -6
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: root.ff.deleteTask(task.id)
+                            enabled: parent.visible
+                            onClicked: {
+                              if (task.pushedToObsidian && task.pushedColumn === task.column) root.ff.undoPushToObsidian(task.id)
+                              else root.ff.pushTaskToObsidian(task.id)
+                            }
                           }
                         }
+                      }
+                    }
+                    // – at right-hand top corner to remove task (kanban) — asks Yes/No before removing
+                    Text {
+                      text: "-"
+                      color: Color.urgent
+                      font.pixelSize: 12
+                      font.bold: true
+                      z: 10
+                      anchors.right: parent.right
+                      anchors.top: parent.top
+                      anchors.rightMargin: 6
+                      anchors.topMargin: 2
+
+                      MouseArea {
+                        anchors.fill: parent
+                        anchors.margins: -6
+                        z: 10
+                        cursorShape: Qt.PointingHandCursor
+                        preventStealing: true
+                        onClicked: { confirmDeleteTask.taskId = task.id; confirmDeleteTask.taskText = task.text; confirmDeleteTask.opened = true }
                       }
                     }
 
@@ -814,6 +1159,26 @@ Panel {
       }
     }
   }
+  }
+
+  ConfirmDialog {
+    id: confirmDeleteTask
+    property string taskId: ""
+    property string taskText: ""
+    message: "Delete task \"" + taskText + "\"? Also removes from Obsidian if pushed. This cannot be undone."
+    confirmText: "Delete"
+    cancelText: "Cancel"
+    onConfirmed: { if (taskId) root.ff.deleteTask(taskId); opened = false; taskId = ""; taskText = "" }
+    onCanceled: { opened = false; taskId = ""; taskText = "" }
+  }
+
+  ConfirmDialog {
+    id: confirmDeleteProfile
+    message: "Delete space \"" + (root.activeProfile ? root.activeProfile.name : "") + "\" and " + Model.tasksForProfile(root.state, root.activeProfileId).length + " tasks? Vault file kept. This cannot be undone."
+    confirmText: "Delete"
+    cancelText: "Cancel"
+    onConfirmed: { root.ff.deleteProfile(root.activeProfileId); opened = false }
+    onCanceled: opened = false
   }
 
   // ---- Helpers ----

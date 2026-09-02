@@ -21,9 +21,13 @@ var COLUMN_LABELS = {
   "done": "Done"
 }
 
+function defaultKanbanProfiles() {
+  return [{ id: "default", name: "Default", createdAt: new Date().toISOString() }]
+}
+
 function defaultState() {
   return {
-    version: 1,
+    version: 2,
     timer: {
       phase: PHASE_WORK,
       status: STATUS_STOPPED,
@@ -34,6 +38,8 @@ function defaultState() {
       activeTaskId: null
     },
     tasks: [],
+    kanbanProfiles: defaultKanbanProfiles(),
+    activeKanbanProfileId: "default",
     settings: {
       workSec: 1500,
       shortBreakSec: 300,
@@ -55,6 +61,69 @@ function defaultState() {
   }
 }
 
+function genProfileId() {
+  return "kp-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6)
+}
+
+function getActiveProfileId(state) {
+  return state.activeKanbanProfileId || "default"
+}
+
+function getProfileById(state, id) {
+  for (var i=0;i<state.kanbanProfiles.length;i++) if (state.kanbanProfiles[i].id === id) return state.kanbanProfiles[i]
+  return null
+}
+
+function getActiveProfile(state) {
+  return getProfileById(state, getActiveProfileId(state)) || state.kanbanProfiles[0]
+}
+
+function setActiveKanbanProfile(state, id) {
+  if (!getProfileById(state, id)) return state
+  state.activeKanbanProfileId = id
+  return state
+}
+
+function createKanbanProfile(state, name) {
+  var cleaned = String(name||"").trim().slice(0,30)
+  if (!cleaned) cleaned = "Untitled"
+  if (state.kanbanProfiles.length >= 20) return state
+  var p = { id: genProfileId(), name: cleaned, createdAt: new Date().toISOString() }
+  state.kanbanProfiles.push(p)
+  state.activeKanbanProfileId = p.id
+  return state
+}
+
+function renameKanbanProfile(state, id, newName) {
+  var cleaned = String(newName||"").trim().slice(0,30)
+  if (!cleaned) return state
+  for (var i=0;i<state.kanbanProfiles.length;i++) if (state.kanbanProfiles[i].id===id) { state.kanbanProfiles[i].name = cleaned; break }
+  return state
+}
+
+function deleteKanbanProfile(state, id) {
+  if (id === "default") return state
+  if (state.kanbanProfiles.length <= 1) return state
+  state.kanbanProfiles = state.kanbanProfiles.filter(function(p){ return p.id !== id })
+  state.tasks = state.tasks.filter(function(t){ return t.profileId !== id })
+  if (state.activeKanbanProfileId === id) state.activeKanbanProfileId = state.kanbanProfiles[0].id
+  if (state.timer.activeTaskId) {
+    var stillExists = state.tasks.some(function(t){ return t.id === state.timer.activeTaskId })
+    if (!stillExists) state.timer.activeTaskId = null
+  }
+  return state
+}
+
+function tasksForProfile(state, profileId) {
+  var pid = profileId || getActiveProfileId(state)
+  return state.tasks.filter(function(t){ return (t.profileId || "default") === pid })
+}
+
+function tasksByColumnForProfile(state, column, profileId) {
+  var pid = profileId || getActiveProfileId(state)
+  return state.tasks.filter(function(t){ return t.column === column && (t.profileId || "default") === pid })
+}
+
 function parse(raw) {
   var fallback = defaultState()
   if (!raw) return fallback
@@ -73,9 +142,11 @@ function isPlainObject(v) {
 
 function mergeDefaults(state, defaults) {
   var result = {
-    version: 1,
+    version: 2,
     timer: isPlainObject(state.timer) ? Object.assign({}, defaults.timer, state.timer) : defaults.timer,
     tasks: Array.isArray(state.tasks) ? state.tasks : [],
+    kanbanProfiles: Array.isArray(state.kanbanProfiles) ? state.kanbanProfiles.slice() : defaultKanbanProfiles(),
+    activeKanbanProfileId: typeof state.activeKanbanProfileId === "string" ? state.activeKanbanProfileId : "default",
     settings: isPlainObject(state.settings) ? Object.assign({}, defaults.settings, state.settings) : defaults.settings
   }
   if ([PHASE_WORK, PHASE_SHORT_BREAK, PHASE_LONG_BREAK].indexOf(result.timer.phase) === -1) result.timer.phase = PHASE_WORK
@@ -97,6 +168,24 @@ function mergeDefaults(state, defaults) {
   else s.obsidianVaultPath = s.obsidianVaultPath.trim().slice(0, 500)
   if (typeof s.obsidianFile !== "string" || !s.obsidianFile.trim()) s.obsidianFile = "FlowFocus.md"
   else s.obsidianFile = s.obsidianFile.trim().slice(0, 100).replace(/[\/\\]/g, "_")
+  // sanitize kanban profiles
+  result.kanbanProfiles = result.kanbanProfiles.filter(function(p){ return p && typeof p.name === "string" && p.name.trim().length>0 && typeof p.id === "string" && p.id.trim().length>0 }).slice(0, 20)
+  if (result.kanbanProfiles.length === 0) result.kanbanProfiles = defaultKanbanProfiles()
+  // ensure default profile exists
+  var hasDefault = result.kanbanProfiles.some(function(p){ return p.id === "default" })
+  if (!hasDefault) result.kanbanProfiles.unshift({ id: "default", name: "Default", createdAt: new Date().toISOString() })
+  for (var pi=0; pi<result.kanbanProfiles.length; pi++) {
+    var pr = result.kanbanProfiles[pi]
+    pr.name = String(pr.name).trim().slice(0, 30)
+    if (!pr.name) pr.name = "Untitled"
+    if (typeof pr.createdAt !== "string") pr.createdAt = new Date().toISOString()
+  }
+  // dedup ids
+  var seenIds = {}
+  result.kanbanProfiles = result.kanbanProfiles.filter(function(p){ if (seenIds[p.id]) return false; seenIds[p.id]=true; return true })
+  var activeId = result.activeKanbanProfileId
+  var activeExists = result.kanbanProfiles.some(function(p){ return p.id === activeId })
+  if (!activeExists) result.activeKanbanProfileId = result.kanbanProfiles[0].id
   // sanitize tasks
   result.tasks = result.tasks.filter(function(t) {
     return t && typeof t.text === "string" && t.text.trim().length > 0
@@ -112,6 +201,9 @@ function mergeDefaults(state, defaults) {
     if (t.pushedAt && typeof t.pushedAt !== "string") t.pushedAt = null
     if (t.pushedColumn && typeof t.pushedColumn !== "string") t.pushedColumn = null
     if (t.pushedColumn && COLUMNS.indexOf(t.pushedColumn) === -1) t.pushedColumn = null
+    if (typeof t.profileId !== "string" || !t.profileId.trim() || !seenIds[t.profileId]) {
+      t.profileId = result.activeKanbanProfileId
+    }
   }
   // sanitize timer
   var tm = result.timer
@@ -262,17 +354,20 @@ function genId() {
   return "ff-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8)
 }
 
-function addTask(state, text, column) {
+function addTask(state, text, column, profileId) {
   var cleaned = String(text || "").trim().slice(0, 200)
   if (!cleaned) return state
   if (state.tasks.length >= 200) return state
   var col = column || "todo"
   if (COLUMNS.indexOf(col) === -1) col = "todo"
+  var pid = profileId || getActiveProfileId(state)
+  if (!getProfileById(state, pid)) pid = getActiveProfileId(state)
   var task = {
     id: genId(),
     text: cleaned,
     column: col,
     done: col === "done",
+    profileId: pid,
     pomodorosSpent: 0,
     pomodorosEstimated: 1,
     pushedToObsidian: false,
@@ -308,6 +403,60 @@ function moveTask(state, id, column) {
       break
     }
   }
+  return state
+}
+
+function moveTaskUp(state, id) {
+  var idx = -1
+  for (var i=0;i<state.tasks.length;i++) if (state.tasks[i].id===id) { idx=i; break }
+  if (idx<0) return state
+  var task = state.tasks[idx]
+  var pid = task.profileId || "default"
+  var col = task.column
+  // collect indices in same profile+col in order
+  var indices=[]
+  for (var j=0;j<state.tasks.length;j++) {
+    var t=state.tasks[j]
+    if ((t.profileId||"default")===pid && t.column===col) indices.push(j)
+  }
+  var pos=indices.indexOf(idx)
+  if (pos<=0) return state
+  var prevIdx=indices[pos-1]
+  var tmp=state.tasks[idx]
+  state.tasks[idx]=state.tasks[prevIdx]
+  state.tasks[prevIdx]=tmp
+  return state
+}
+
+function moveTaskDown(state, id) {
+  var idx=-1
+  for (var i=0;i<state.tasks.length;i++) if (state.tasks[i].id===id) { idx=i; break }
+  if (idx<0) return state
+  var task=state.tasks[idx]
+  var pid=task.profileId || "default"
+  var col=task.column
+  var indices=[]
+  for (var j=0;j<state.tasks.length;j++) {
+    var t=state.tasks[j]
+    if ((t.profileId||"default")===pid && t.column===col) indices.push(j)
+  }
+  var pos=indices.indexOf(idx)
+  if (pos<0 || pos>=indices.length-1) return state
+  var nextIdx=indices[pos+1]
+  var tmp=state.tasks[idx]
+  state.tasks[idx]=state.tasks[nextIdx]
+  state.tasks[nextIdx]=tmp
+  return state
+}
+
+function cycleKanbanProfile(state, dir) {
+  if (!state.kanbanProfiles || state.kanbanProfiles.length<=1) return state
+  var cur = getActiveProfileId(state)
+  var idx=-1
+  for (var i=0;i<state.kanbanProfiles.length;i++) if (state.kanbanProfiles[i].id===cur) { idx=i; break }
+  if (idx<0) idx=0
+  var next = (idx + dir + state.kanbanProfiles.length) % state.kanbanProfiles.length
+  state.activeKanbanProfileId = state.kanbanProfiles[next].id
   return state
 }
 
@@ -350,16 +499,50 @@ function markTaskPushed(state, id) {
   return state
 }
 
-function tasksByColumn(state, column) {
-  return state.tasks.filter(function(t) { return t.column === column })
+function clearTaskPushed(state, id) {
+  for (var i = 0; i < state.tasks.length; i++) {
+    if (state.tasks[i].id === id) {
+      state.tasks[i].pushedToObsidian = false
+      state.tasks[i].pushedAt = null
+      state.tasks[i].pushedColumn = null
+      break
+    }
+  }
+  return state
 }
 
-function incompleteTasks(state) {
-  return state.tasks.filter(function(t) { return !t.done })
+function removeTaskFromVault(pluginDir, settings, task, vaultPath, profileName) {
+  if (!task || !task.id) return false
+  var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
+  if (!vp) return false
+  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
+  else if (vp === "~") vp = Quickshell.env("HOME") || ""
+  if (!vp) return false
+  var pid = String(task.profileId || "default")
+  var pName = profileName
+  if (pName === undefined) pName = pid === "default" ? "Default" : pid
+  var file = (pid === "default") ? obsidianFilePath(settings, vp) : obsidianFilePathForProfile(settings, vp, pid, pName)
+  if (!file) return false
+  var idTag = "<!-- " + task.id + " -->"
+  var escFile = file.replace(/"/g, '\\"')
+  var escId = idTag.replace(/"/g, '\\"')
+  var cmd = "touch \"" + escFile + "\" 2>/dev/null || true; grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\""
+  Quickshell.execDetached(["bash", "-c", cmd])
+  return true
 }
 
-function nextTask(state) {
-  var incomplete = incompleteTasks(state)
+function tasksByColumn(state, column, profileId) {
+  var pid = profileId || getActiveProfileId(state)
+  return state.tasks.filter(function(t) { return t.column === column && (t.profileId || "default") === pid })
+}
+
+function incompleteTasks(state, profileId) {
+  var pid = profileId || getActiveProfileId(state)
+  return state.tasks.filter(function(t) { return !t.done && (t.profileId || "default") === pid })
+}
+
+function nextTask(state, profileId) {
+  var incomplete = incompleteTasks(state, profileId)
   if (incomplete.length === 0) return null
   var doing = incomplete.filter(function(t) { return t.column === "doing" })
   if (doing.length > 0) return doing[0]
@@ -443,43 +626,71 @@ function sanitizeVaultPath(p) {
   return s
 }
 
+function sanitizeProfileNameForPath(name) {
+  var s = String(name || "Default").trim().slice(0, 30)
+  if (!s) s = "Default"
+  s = s.replace(/[\/\\]/g, "_").replace(/[^a-zA-Z0-9 _-]/g, "_").replace(/\s+/g, "_")
+  if (!s) s = "Default"
+  return s.slice(0, 30)
+}
+
 function obsidianFilePath(settings, vaultPath) {
   var vp = sanitizeVaultPath(vaultPath || settings.obsidianVaultPath || "")
   if (!vp) return ""
-  // expand ~ via Quickshell.env HOME if needed at call site; here keep as-is
   var file = settings.obsidianFile || "FlowFocus.md"
   file = String(file).trim() || "FlowFocus.md"
   file = file.replace(/[\/\\]/g, "_").slice(0, 100)
   if (!file.toLowerCase().endsWith(".md")) file += ".md"
-  // join with /
   if (vp.endsWith("/")) return vp + file
   return vp + "/" + file
 }
 
-function appendTaskToVault(pluginDir, settings, task, vaultPath) {
+function obsidianFilePathForProfile(settings, vaultPath, profileId, profileName) {
+  var base = obsidianFilePath(settings, vaultPath)
+  if (!base) return ""
+  var pid = String(profileId || "default")
+  if (pid === "default") return base
+  var vp = sanitizeVaultPath(vaultPath || settings.obsidianVaultPath || "")
+  if (!vp) return base
+  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
+  else if (vp === "~") vp = Quickshell.env("HOME") || ""
+  var sanitized = sanitizeProfileNameForPath(profileName || pid)
+  var file = settings.obsidianFile || "FlowFocus.md"
+  file = String(file).trim() || "FlowFocus.md"
+  file = file.replace(/[\/\\]/g, "_").slice(0, 100)
+  if (!file.toLowerCase().endsWith(".md")) file += ".md"
+  // per-profile subfolder: vault/ProfileName/file
+  if (vp.endsWith("/")) return vp + sanitized + "/" + file
+  return vp + "/" + sanitized + "/" + file
+}
+
+function appendTaskToVault(pluginDir, settings, task, vaultPath, profileName) {
   if (!settings.obsidianEnabled) return false
   var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
   if (!vp) return false
-  // expand ~ to HOME
   if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
   else if (vp === "~") vp = Quickshell.env("HOME") || ""
   if (!vp) return false
-  var file = obsidianFilePath(settings, vp)
+  // per-profile file: Default -> base file, others -> subfolder/ProfileName/file
+  var pid = String(task.profileId || "default")
+  var pName = profileName
+  if (pName === undefined) pName = pid === "default" ? "Default" : pid
+  var file = (pid === "default") ? obsidianFilePath(settings, vp) : obsidianFilePathForProfile(settings, vp, pid, pName)
   if (!file) return false
   var now = new Date()
   var date = now.toISOString().slice(0,10)
   var time = now.toTimeString().slice(0,5)
-  var text = String(task.text || "").replace(/"/g, "'").replace(/\n/g, " ").slice(0,200)
+  var text = String(task.text || "").replace(/\\/g, "\\\\").replace(/"/g, "'").replace(/\n/g, " ").slice(0,200)
   var col = String(task.column || "todo")
   if (COLUMNS.indexOf(col) === -1) col = "todo"
   var label = COLUMN_LABELS[col] || col
   var isDone = task.done === true || col === "done"
   var idTag = "<!-- " + task.id + " -->"
   var line = "- [" + (isDone ? "x" : " ") + "] " + text + " [" + label + "] — " + date + " " + time + " " + idTag
-  var escFile = file.replace(/"/g, '\\"')
-  var escLine = line.replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`")
-  var escId = idTag.replace(/"/g, '\\"')
-  // idempotent: remove any existing line for this id before appending (prevents duplicates on re-push after column change)
+  var escFile = file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var escLine = line.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`")
+  var escId = idTag.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  // per-profile idempotent: remove existing line for this id before appending
   var cmd = "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && touch \"" + escFile + "\" && "
       + "grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\"; "
       + "printf '%s\\n' \"" + escLine + "\" >> \"" + escFile + "\""
@@ -498,6 +709,7 @@ if (typeof module !== "undefined") {
     COLUMNS: COLUMNS,
     COLUMN_LABELS: COLUMN_LABELS,
     defaultState: defaultState,
+    defaultKanbanProfiles: defaultKanbanProfiles,
     parse: parse,
     serialize: serialize,
     phaseDurationSec: phaseDurationSec,
@@ -514,10 +726,24 @@ if (typeof module !== "undefined") {
     tick: tick,
     shouldAutoStart: shouldAutoStart,
     progress: progress,
+    genId: genId,
+    genProfileId: genProfileId,
+    getActiveProfileId: getActiveProfileId,
+    getProfileById: getProfileById,
+    getActiveProfile: getActiveProfile,
+    setActiveKanbanProfile: setActiveKanbanProfile,
+    createKanbanProfile: createKanbanProfile,
+    renameKanbanProfile: renameKanbanProfile,
+    deleteKanbanProfile: deleteKanbanProfile,
+    tasksForProfile: tasksForProfile,
+    tasksByColumnForProfile: tasksByColumnForProfile,
     addTask: addTask,
     updateTask: updateTask,
     deleteTask: deleteTask,
     moveTask: moveTask,
+    moveTaskUp: moveTaskUp,
+    moveTaskDown: moveTaskDown,
+    cycleKanbanProfile: cycleKanbanProfile,
     toggleTaskDone: toggleTaskDone,
     setActiveTask: setActiveTask,
     tasksByColumn: tasksByColumn,
@@ -531,6 +757,8 @@ if (typeof module !== "undefined") {
     sanitizeVaultPath: sanitizeVaultPath,
     obsidianFilePath: obsidianFilePath,
     appendTaskToVault: appendTaskToVault,
-    markTaskPushed: markTaskPushed
+    markTaskPushed: markTaskPushed,
+    clearTaskPushed: clearTaskPushed,
+    removeTaskFromVault: removeTaskFromVault
   }
 }

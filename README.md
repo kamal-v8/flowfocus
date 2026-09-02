@@ -1,15 +1,16 @@
-# flowfocus v1.2.0 — polished, lightweight
+# FocusFlow v1.4.0 — polished, lightweight
 
-Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — single bar widget, rich popup, minimal resource footprint.
+Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — single bar widget, rich popup, minimal resource footprint. Hover shows **FocusFlow**.
 
-![Flowfocus Preview](assets/preview.png)
+![FocusFlow Preview](assets/preview.png)
 
 * **Pomodoro cycle** — Work / Short break / Long break (default `25/5/15` min, every 4 cycles), pause/resume/reset/skip, cycle counter, deadline-based math survives bar reloads. Single `1000ms` tick timer; ticks muted 30s during alarm to avoid overlap in continuous mode.
-* **Sound (lightweight)** — `tick.ogg` (5.3K mono 22k) + `alarm.ogg` (142K mono 22k) — was `5.6M` WAV. Played via `pw-play --volume` with path sanitization (`..` rejected). `tick` every second when enabled, `alarm` once on phase end.
-* **To-Do** — plain list or Kanban (`Backlog / To Do / Doing / Done`, `124px` cols in `520px` board, horizontal scroll, per-column vertical scroll for overflow). Plain: custom `18×18` checkbox. Both support `⬆` push to Obsidian. `Space` start/pause when panel focused.
-* **Obsidian vault** — optional manual export of any column. Task → `- [ ] task [To Do] — YYYY-MM-DD HH:MM <!-- id -->` or `- [x]` if `Done`. Idempotent `grep -v <!-- id -->` prevents duplicates; `✓` state per-column, re-push allowed after `todo→done` to flip `[ ]→[x]`. `Push all` handles all pending.
+* **Sound (lightweight)** — `tick.ogg` (5.3K mono 22k) + `alarm.ogg` (142K mono 22k) + fallback `tick.wav/alarm.wav` mono 22k — was `5.6M` WAV. Played via `pw-play --volume || paplay` with path sanitization (`..` rejected). `tick` every second when enabled, `alarm` once on phase end. Volume sliders now `save+apply` on release.
+* **To-Do** — plain list or Kanban (`132px` cols in `580px` board, horizontal 12px gaps, per-column vertical scroll). Plain: custom `18×18` checkbox. Both support `⬆` push → `↩` undo to Obsidian. `Space` start/pause when panel focused. `▲ ▼` on hover to prioritize within column.
+* **Obsidian vault** — optional manual export per kanban profile. Task → `- [ ] task [To Do] — YYYY-MM-DD HH:MM <!-- id -->` (or `[x]` if `Done`) in `vault/<Profile>/FlowFocus.md` (Default → `vault/FlowFocus.md`). Idempotent `grep -v <!-- id -->`, `✓`→`↩` undo removes line, `Push all` per active profile.
+* **Kanban profiles** — `Default` + up to 20 custom spaces (`Kanban — <Space>` heading). `Spaces:` pill tabs + `+` creator, `Rename`/`Delete` (with `Yes/No` confirm). Switch via click or `Alt+H` / `Alt+L` when FocusFlow focused. Each profile isolated tasks, vault files, and counts.
 * **Bar** — idle `` only; running ring + `MM:SS` (`accent` work, `muted` break, `urgent` long break). `SUPER + SHIFT + T` toggles popup.
-* **Compact UI** — `SmallToggle` `32px` rows (was `54px` cards) in 2-col grid, `PanelSlider 95px` (was full-width), timing sliders side-by-side, vault path+file inline, scrollbars removed (`Flickable` only). Outer kanban capped `200/300px`, columns `150/240px` vertical scroll; plain list capped `220/320px`.
+* **Compact UI** — `SmallToggle` `32px` 2-col grid, `PanelSlider 95px`, timing side-by-side, vault inline, per-column `Flickable` scroll, capped heights, no `ScrollBar` chrome, left accent `3px` + `●` for active task, `-` delete at top-right `z:10`.
 
 ## Install
 ```bash
@@ -56,7 +57,7 @@ Example:
 ```
 
 ## Sounds
-* `tick.ogg` — 0.5s mono 22k vorbis from `clock.ogg` (Focus Timer flatpak). `alarm.ogg` — 30.01s mono 22k from `s8E_Ggf_QsQ` (grandfather clock) via `yt-dlp --download-sections` + `ffmpeg -ac 1 -ar 22050 -c:a libvorbis -q:a 3`. Play: `pw-play --volume 0.5 ~/.config/omarchy/plugins/flowfocus/sounds/alarm.ogg`.
+* `tick.ogg` (5.3K) / `tick.wav` (23K) — 0.5s mono 22k vorbis/PCM from `clock.ogg` (Focus Timer flatpak). `alarm.ogg` (142K) / `alarm.wav` (1.3M) — 30.01s mono 22k from `s8E_Ggf_QsQ` via `yt-dlp --download-sections` + `ffmpeg -ac 1 -ar 22050 -c:a libvorbis -q:a 3 / pcm_s16le`. Play: `pw-play --volume 0.5 ~/.config/omarchy/plugins/flowfocus/sounds/alarm.ogg || pw-play .../alarm.wav` (fallback `paplay`).
 
 ## IPC
 ```bash
@@ -65,22 +66,25 @@ qs ipc -n -p "$OMARCHY_PATH/shell" call flowfocus {start,pause,resume,toggle,res
 ```
 
 ## Security
-* `Model.sanitizePluginDir` blocks `..`; `sanitizeVaultPath` blocks `..`/`;`/`&`/`|`/`$`/`\``/`*`/`?`/`<>`/`^()`/`{}`/`[]`/`\`/`'`/`"`/control chars, 500 chars, vault file `_/\\`→`_`. Task text `trim` 200, `replace "→'` and `$/\`` escaped before `bash -c` `printf`. Task `column` whitelisted, `done` bool-coerced. All writes `FileView atomicWrites`.
+* `Model.sanitizePluginDir` blocks `..`; `sanitizeVaultPath` blocks `..`/`;`/`&`/`|`/`$`/`\``/`*`/`?`/`<>`/`^()`/`{}`/`[]`/`\`/`'`/`"`/control chars, 500 chars, vault file `_/\\`→`_` + `sanitizeProfileNameForPath` for per-profile subfolders. Task text `trim` 200, `\\`/`"`/`$`/`` ` `` escaped before `bash -c` `printf`. Task `column`/`profileId` whitelisted, `done`/`pushed` bool-coerced. All writes `FileView atomicWrites`. `ConfirmDialog` Yes/No for delete task/profile + vault sync.
 
 ## Development
 ```bash
 omarchy plugin validate ~/.config/omarchy/plugins/flowfocus
 omarchy restart shell
+# Alt+H/L cycles kanban profiles when FocusFlow focused
 ```
-* `BarWidget.qml` — `FileView` + single `tickTimer 1000ms` + `alarmMuteTimer 30000ms`, `Model.tick` deadline, `JSON.parse(JSON.stringify(state))` to trigger QML.
-* `Panel.qml` — `KeyboardPanel` (no extra `BorderSurface`), `Flickable` per-column, `SmallToggle: Item 32px`.
-* `Model.js` — pure: `defaultState/parse/serialize`, `phaseDurationSec/tick/progress`, task CRUD + `pushedToObsidian/pushedColumn`, `playTick/alarm` with sanitized `tick.ogg/alarm.ogg`, `appendTaskToVault` idempotent.
+* `BarWidget.qml` — `FileView` + single `tickTimer 1000ms` + `alarmMuteTimer 30000ms`, `Model.tick` deadline, `JSON.parse(JSON.stringify(state))` to trigger QML, `cycleProfile`/`moveTaskUp/Down`.
+* `Panel.qml` — `KeyboardPanel` (no extra `BorderSurface`), `Flickable` per-column, `SmallToggle: Item 32px`, `Shortcut Alt+H/L`, hover `▲▼` prioritization, `ConfirmDialog` for deletes.
+* `Model.js` — pure: `defaultState v2` with `kanbanProfiles/activeKanbanProfileId`, `parse` migration, `phaseDurationSec/tick/progress`, task CRUD + `profileId` + `pushedToObsidian/pushedColumn`, `playTick/alarm` `tick.ogg/wav` fallback, `appendTaskToVault` per-profile `vault/<Profile>/FlowFocus.md` idempotent.
 
-## Changelog v1.2.0 (polished)
-* Sounds: `5.5M+94K WAV` → `142K+5K OGG` mono 22k, removed `QtQuick.Controls` (ScrollBar), single timer + 30s mute — less CPU/IO/mem.
-* Vault: all columns manual `⬆`→`✓`, `[ ]` vs `[x]` per `Done`, `<!-- id -->` dedup, `Push all` pending `!pushed||pushedColumn!==column`, path sanitized, `grep -v` idempotent.
-* UI: 2-col `SmallToggle`, `95px` sliders, per-column vertical scroll, capped heights, no `ScrollBar` chrome.
-* Fixes: mergeDefaults `COLUMNS.indexOf=== -1`, `addTask` trim, `syncSettingsFromShellJson` coerce, checkbox `NaN`, `X` overflow, `71px→124px` kanban, gear collapsed, `tick+alarm` overlap muted, todo overflow invisible fixed.
+## Changelog v1.4.0 (polished)
+* Profiles: 20 spaces (`Default` + custom), `Kanban — <Space>` heading, pill tabs + `+` creator, `Alt+H/L` cycle when focused, per-profile tasks/vault files/counts, `Yes/No` confirm on delete.
+* Prioritize: `▲ ▼` on hover (plain + kanban) → `moveTaskUp/Down` within `profile+column`, top-right `-` delete `z:10`.
+* Sounds: `5.5M+94K WAV` → `142K+5K OGG` + `1.3M+23K WAV` fallback mono 22k, removed `QtQuick.Controls`, single timer + 30s mute — less CPU/IO/mem. Volume sliders `save+apply` on release.
+* Vault: per-profile subfolders + `sanitizeProfileNameForPath`, all columns `⬆`→`↩` undo (`removeTaskFromVault` + `clearTaskPushed`), `[ ]` vs `[x]` per `Done`, `<!-- id -->` dedup, `Push all` per active profile, delete task also removes from vault, path `\\` escaped.
+* UI: 2-col `SmallToggle`, `95px` sliders, per-column scroll, `580px` board `132px` cols `12px` gaps, left accent `3px` + `●` for active.
+* Fixes: `sanitizeVaultPath` blocks `&|*?<>^(){}[]\\'"` + `\` escape, `syncSettingsFromShellJson` coerce, `..` blocks, `Alt+H/L` enable `panel.open` (was `root.opened` bug), `\\` escape in vault line.
 
 ## License
 MIT — see `LICENSE`. `clock.ogg` © Focus Timer, `alarm.ogg` sample from YouTube grandfather clock — replace for fully libre build.

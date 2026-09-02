@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "flowfocus",
-  "name": "flowfocus",
-  "version": "1.2.0",
+  "name": "FocusFlow",
+  "version": "1.4.0",
   "author": "kamal",
-  "description": "Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
+  "description": "FocusFlow — Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
   "kinds": [
     "bar-widget"
   ],
@@ -12,8 +12,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "flowfocus",
-    "description": "Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
+    "displayName": "FocusFlow",
+    "description": "FocusFlow — Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
     "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right",
