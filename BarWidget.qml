@@ -265,17 +265,17 @@ BarWidget {
   IpcHandler {
     target: "flowfocus"
 
-    function start(): void { root.startTimer() }
-    function pause(): void { root.pauseTimer() }
-    function resume(): void { root.resumeTimer() }
-    function toggle(): void { root.toggleTimer() }
-    function reset(): void { root.resetTimer() }
-    function skip(): void { root.skipPhase() }
-    function open(): void { root.open() }
-    function close(): void { root.close() }
-    function show(): void { root.open() }
-    function hide(): void { root.close() }
-    function togglePanel(): void { root.togglePanel() }
+    function start() { root.startTimer() }
+    function pause() { root.pauseTimer() }
+    function resume() { root.resumeTimer() }
+    function toggle() { root.toggleTimer() }
+    function reset() { root.resetTimer() }
+    function skip() { root.skipPhase() }
+    function open() { root.open() }
+    function close() { root.close() }
+    function show() { root.open() }
+    function hide() { root.close() }
+    function togglePanel() { root.togglePanel() }
   }
 
   WidgetButton {

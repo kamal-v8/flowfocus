@@ -612,4 +612,9 @@ Panel {
     var next = cols[(idx + 1) % cols.length]
     root.ff.moveTask(task.id, next)
   }
+  function switchPanel(direction) {
+    root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
+    root.ff.saveState()
+    root.ff.applyTickState()
+  }
 }

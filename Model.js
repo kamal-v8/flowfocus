@@ -72,7 +72,7 @@ function mergeDefaults(state, defaults) {
     tasks: Array.isArray(state.tasks) ? state.tasks : [],
     settings: isPlainObject(state.settings) ? Object.assign({}, defaults.settings, state.settings) : defaults.settings
   }
-  if (COLUMNS.indexOf(result.timer.phase) === -1) result.timer.phase = PHASE_WORK
+  if ([PHASE_WORK, PHASE_SHORT_BREAK, PHASE_LONG_BREAK].indexOf(result.timer.phase) === -1) result.timer.phase = PHASE_WORK
   // sanitize numeric settings
   var s = result.settings
   s.workSec = Math.max(60, Math.min(3600, Number(s.workSec) || 1500))
