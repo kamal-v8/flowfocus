@@ -75,8 +75,8 @@ function mergeDefaults(state, defaults) {
   if ([PHASE_WORK, PHASE_SHORT_BREAK, PHASE_LONG_BREAK].indexOf(result.timer.phase) === -1) result.timer.phase = PHASE_WORK
   // sanitize numeric settings
   var s = result.settings
-  s.workSec = Math.max(60, Math.min(3600, Number(s.workSec) || 1500))
-  s.shortBreakSec = Math.max(30, Math.min(1800, Number(s.shortBreakSec) || 300))
+  s.workSec = Math.max(60, Math.min(18000, Number(s.workSec) || 1500))
+  s.shortBreakSec = Math.max(30, Math.min(1500, Number(s.shortBreakSec) || 300))
   s.longBreakSec = Math.max(60, Math.min(3600, Number(s.longBreakSec) || 900))
   s.longBreakInterval = Math.max(1, Math.min(12, Math.floor(Number(s.longBreakInterval) || 4)))
   s.tickVolume = Math.max(0, Math.min(1, Number(s.tickVolume) || 0.3))
@@ -95,8 +95,8 @@ function mergeDefaults(state, defaults) {
   // sanitize timer
   var tm = result.timer
   if ([STATUS_STOPPED, STATUS_RUNNING, STATUS_PAUSED].indexOf(tm.status) === -1) tm.status = STATUS_STOPPED
-  tm.remainingSec = Math.max(0, Math.min(3600, Math.floor(Number(tm.remainingSec) || s.workSec)))
-  tm.phaseDurationSec = Math.max(1, Math.min(3600, Math.floor(Number(tm.phaseDurationSec) || s.workSec)))
+  tm.remainingSec = Math.max(0, Math.min(18000, Math.floor(Number(tm.remainingSec) || s.workSec)))
+  tm.phaseDurationSec = Math.max(1, Math.min(18000, Math.floor(Number(tm.phaseDurationSec) || s.workSec)))
   tm.completedWorkPhases = Math.max(0, Math.floor(Number(tm.completedWorkPhases) || 0))
   return result
 }

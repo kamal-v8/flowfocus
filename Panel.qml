@@ -289,6 +289,83 @@ Panel {
           }
         }
 
+        Toggle {
+          label: "Continuous mode"
+          description: "Auto-start breaks and work sessions"
+          checked: root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork
+          onClicked: {
+            var newVal = !(root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork)
+            root.ff.state.settings.autoStartBreaks = newVal
+            root.ff.state.settings.autoStartWork = newVal
+            root.ff.saveState()
+            root.ff.applyTickState()
+          }
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.controlPaddingX
+          
+          Text {
+            text: "Pomodoro (" + Math.round(root.ffSettings.workSec / 60) + "m)"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            anchors.verticalCenter: parent.verticalCenter
+            width: 110
+          }
+
+          Slider {
+            from: 1
+            to: 300
+            stepSize: 1
+            value: root.ffSettings.workSec / 60
+            onMoved: {
+              root.ff.state.settings.workSec = Math.floor(value * 60)
+              if (root.ff.isStopped && root.ff.phase === Model.PHASE_WORK) {
+                root.ff.state.timer.remainingSec = root.ff.state.settings.workSec
+                root.ff.state.timer.phaseDurationSec = root.ff.state.settings.workSec
+              }
+              root.ff.saveState()
+              root.ff.applyTickState()
+            }
+            width: parent.width - 110 - parent.spacing
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.spacing.controlPaddingX
+          
+          Text {
+            text: "Break (" + Math.round(root.ffSettings.shortBreakSec / 60) + "m)"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            anchors.verticalCenter: parent.verticalCenter
+            width: 110
+          }
+
+          Slider {
+            from: 1
+            to: 25
+            stepSize: 1
+            value: root.ffSettings.shortBreakSec / 60
+            onMoved: {
+              root.ff.state.settings.shortBreakSec = Math.floor(value * 60)
+              if (root.ff.isStopped && root.ff.phase === Model.PHASE_SHORT_BREAK) {
+                root.ff.state.timer.remainingSec = root.ff.state.settings.shortBreakSec
+                root.ff.state.timer.phaseDurationSec = root.ff.state.settings.shortBreakSec
+              }
+              root.ff.saveState()
+              root.ff.applyTickState()
+            }
+            width: parent.width - 110 - parent.spacing
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+
         PanelSeparator {}
       }
 
