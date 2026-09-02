@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Controls
 import Quickshell
 import Quickshell.Io
 import qs.Commons
@@ -56,6 +55,53 @@ Panel {
   readonly property int kanbanPanelWidth: Style.space(520)
   readonly property int panelWidth: root.kanbanMode ? kanbanPanelWidth : basePanelWidth
 
+  // Ultra-compact toggle — dense row (32px) without BorderSurface card chrome
+  // so Settings doesn't eat 4×54px cards. Uses same ToggleSwitch but inline.
+  component SmallToggle: Item {
+    property string label: ""
+    property string description: ""
+    property bool checked: false
+    signal clicked()
+    implicitHeight: 32
+    implicitWidth: Style.space(240)
+    Row {
+      anchors.fill: parent
+      anchors.leftMargin: Style.space(4)
+      anchors.rightMargin: Style.space(4)
+      spacing: Style.spacing.rowPaddingX
+      Column {
+        width: parent.width - _switch.width - parent.spacing
+        spacing: 0
+        anchors.verticalCenter: parent.verticalCenter
+        Text {
+          text: parent.parent.parent.label
+          color: Color.foreground
+          font.family: Style.font.family
+          font.pixelSize: Style.font.bodySmall
+          font.bold: true
+          elide: Text.ElideRight
+          width: parent.width
+        }
+        Text {
+          visible: parent.parent.parent.description !== ""
+          text: parent.parent.parent.description
+          color: Color.muted
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+          width: parent.width
+        }
+      }
+      ToggleSwitch {
+        id: _switch
+        checked: parent.parent.checked
+        interactive: false
+        anchors.verticalCenter: parent.verticalCenter
+      }
+    }
+    MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -82,7 +128,7 @@ Panel {
       id: content
       anchors.fill: parent
       anchors.topMargin: Style.space(4)
-      spacing: Style.spacing.controlPaddingY
+      spacing: Style.space(4)
 
       // breathing room so progress ring doesn't clip card border
       Item { width: parent.width; height: Style.space(4) }
@@ -230,139 +276,176 @@ Panel {
 
       PanelSeparator {}
 
-      // ---- Settings section (collapsible) ----
+      // ---- Settings section (collapsible) — compact grid so panel doesn't become tall ----
       Column {
         width: parent.width
-        spacing: Style.spacing.controlPaddingY
+        spacing: Style.space(3)
         visible: root.settingsVisible
 
-        PanelSectionHeader {
-          text: "Settings"
-        }
+        PanelSectionHeader { text: "Settings" }
 
-        Toggle {
-          label: "Tick sound"
-          description: "Play a soft tick every second while running"
-          checked: root.ffSettings.tickEnabled
-          onClicked: {
-            root.ff.state.settings.tickEnabled = !root.ffSettings.tickEnabled
-            root.ff.saveState()
-            root.ff.applyTickState()
+        // Sound row — always 2-across even on 340px (166px each) to halve height
+        Grid {
+          width: parent.width
+          columns: 2
+          columnSpacing: Style.spacing.controlPaddingX
+          rowSpacing: Style.space(2)
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Tick sound"
+            description: "Tick every second"
+            checked: root.ffSettings.tickEnabled
+            onClicked: { root.ff.state.settings.tickEnabled = !root.ffSettings.tickEnabled; root.ff.saveState(); root.ff.applyTickState() }
+          }
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Alarm sound"
+            description: "Dun on phase end"
+            checked: root.ffSettings.alarmEnabled !== false
+            onClicked: { root.ff.state.settings.alarmEnabled = !(root.ffSettings.alarmEnabled !== false); root.ff.saveState(); root.ff.applyTickState() }
           }
         }
-
         Row {
           width: parent.width
-          spacing: Style.spacing.controlPaddingX
-          visible: root.ffSettings.tickEnabled
-
-          Text {
-            text: "Volume"
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            anchors.verticalCenter: parent.verticalCenter
-          }
-
-          Slider {
-            id: volumeSlider
-            from: 0
-            to: 1
-            value: root.ffSettings.tickVolume
-            onMoved: {
-              root.ff.state.settings.tickVolume = value
-              root.ff.saveState()
+          spacing: Style.space(8)
+          visible: root.ffSettings.tickEnabled || root.ffSettings.alarmEnabled !== false
+          Grid {
+            columns: (root.panelWidth >= 500 && root.ffSettings.tickEnabled && root.ffSettings.alarmEnabled !== false) ? 2 : 1
+            columnSpacing: Style.space(8)
+            rowSpacing: Style.space(2)
+            width: parent.width
+            Row {
+              visible: root.ffSettings.tickEnabled
+              spacing: Style.spacing.controlPaddingX
+              Text { text: "Tick vol"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
+              PanelSlider { bar: root.bar; minimum: 0; maximum: 1; step: 0.05; value: root.ffSettings.tickVolume; onMoved: function(v){ root.ff.state.settings.tickVolume = v; root.ff.saveState() } ; onReleased: function(v){ root.ff.state.settings.tickVolume = v; root.ff.saveState(); root.ff.applyTickState() }; width: 95 }
             }
-            width: 140
-            anchors.verticalCenter: parent.verticalCenter
+            Row {
+              visible: root.ffSettings.alarmEnabled !== false
+              spacing: Style.spacing.controlPaddingX
+              Text { text: "Alarm vol"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
+              PanelSlider { bar: root.bar; minimum: 0; maximum: 1; step: 0.05; value: root.ffSettings.alarmVolume; onMoved: function(v){ root.ff.state.settings.alarmVolume = v; root.ff.saveState() }; onReleased: function(v){ root.ff.state.settings.alarmVolume = v; root.ff.saveState(); root.ff.applyTickState() }; width: 95 }
+            }
           }
         }
 
-        Toggle {
-          label: "Kanban board"
-          description: "Show tasks as columns (Backlog / To Do / Doing / Done)"
-          checked: root.kanbanMode
-          onClicked: {
-            root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
-            root.ff.saveState()
-            root.ff.applyTickState()
-          }
-        }
-
-        Toggle {
-          label: "Continuous mode"
-          description: "Auto-start breaks and work sessions"
-          checked: root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork
-          onClicked: {
-            var newVal = !(root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork)
-            root.ff.state.settings.autoStartBreaks = newVal
-            root.ff.state.settings.autoStartWork = newVal
-            root.ff.saveState()
-            root.ff.applyTickState()
-          }
-        }
-
-        Row {
+        // Board / Pomodoros / Continuous — always 2-across
+        Grid {
           width: parent.width
-          spacing: Style.spacing.controlPaddingX
-          
-          Text {
-            text: "Pomodoro (" + Math.round(root.ffSettings.workSec / 60) + "m)"
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            anchors.verticalCenter: parent.verticalCenter
-            width: 110
+          columns: 2
+          columnSpacing: Style.spacing.controlPaddingX
+          rowSpacing: Style.space(2)
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Kanban board"
+            description: "Backlog/To Do/Doing/Done"
+            checked: root.kanbanMode
+            onClicked: { root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode; root.ff.saveState(); root.ff.applyTickState() }
           }
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Show pomodoros"
+            description: "🍅 on cards"
+            checked: root.ffSettings.showPomodoros !== false
+            onClicked: { root.ff.state.settings.showPomodoros = !(root.ffSettings.showPomodoros !== false); root.ff.saveState(); root.ff.applyTickState() }
+          }
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Continuous"
+            description: "Auto-start breaks/work"
+            checked: root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork
+            onClicked: { var v = !(root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork); root.ff.state.settings.autoStartBreaks = v; root.ff.state.settings.autoStartWork = v; root.ff.saveState(); root.ff.applyTickState() }
+          }
+          Item { width: (parent.width - parent.columnSpacing)/2; height: 32 } // spacer to keep grid even
+        }
 
-          Slider {
-            from: 1
-            to: 300
-            stepSize: 1
-            value: root.ffSettings.workSec / 60
-            onMoved: {
-              root.ff.state.settings.workSec = Math.floor(value * 60)
-              if (root.ff.isStopped && root.ff.phase === Model.PHASE_WORK) {
-                root.ff.state.timer.remainingSec = root.ff.state.settings.workSec
-                root.ff.state.timer.phaseDurationSec = root.ff.state.settings.workSec
+        // Timing — two 110px sliders side-by-side when wide, stacked when narrow
+        Grid {
+          width: parent.width
+          columns: root.panelWidth >= 500 ? 2 : 1
+          columnSpacing: Style.space(8)
+          rowSpacing: Style.space(2)
+          Row {
+            spacing: Style.spacing.controlPaddingX
+            Text { text: "Work (" + Math.round(root.ffSettings.workSec / 60) + "m)"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 54 }
+            PanelSlider {
+              bar: root.bar; minimum: 1; maximum: 60; step: 1; integer: true
+              value: root.ffSettings.workSec / 60
+              onMoved: function(v){ root.ff.state.settings.workSec = Math.floor(v*60); if(root.ff.isStopped && root.ff.phase===Model.PHASE_WORK){ root.ff.state.timer.remainingSec=root.ff.state.settings.workSec; root.ff.state.timer.phaseDurationSec=root.ff.state.settings.workSec } root.ff.saveState(); root.ff.applyTickState() }
+              onReleased: function(v){ root.ff.state.settings.workSec = Math.floor(v*60); if(root.ff.isStopped && root.ff.phase===Model.PHASE_WORK){ root.ff.state.timer.remainingSec=root.ff.state.settings.workSec; root.ff.state.timer.phaseDurationSec=root.ff.state.settings.workSec } root.ff.saveState(); root.ff.applyTickState() }
+              width: 95
+            }
+          }
+          Row {
+            spacing: Style.spacing.controlPaddingX
+            Text { text: "Break (" + Math.round(root.ffSettings.shortBreakSec / 60) + "m)"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 54 }
+            PanelSlider {
+              bar: root.bar; minimum: 1; maximum: 25; step: 1; integer: true
+              value: root.ffSettings.shortBreakSec / 60
+              onMoved: function(v){ root.ff.state.settings.shortBreakSec = Math.floor(v*60); if(root.ff.isStopped && root.ff.phase===Model.PHASE_SHORT_BREAK){ root.ff.state.timer.remainingSec=root.ff.state.settings.shortBreakSec; root.ff.state.timer.phaseDurationSec=root.ff.state.settings.shortBreakSec } root.ff.saveState(); root.ff.applyTickState() }
+              onReleased: function(v){ root.ff.state.settings.shortBreakSec = Math.floor(v*60); if(root.ff.isStopped && root.ff.phase===Model.PHASE_SHORT_BREAK){ root.ff.state.timer.remainingSec=root.ff.state.settings.shortBreakSec; root.ff.state.timer.phaseDurationSec=root.ff.state.settings.shortBreakSec } root.ff.saveState(); root.ff.applyTickState() }
+              width: 95
+            }
+          }
+        }
+
+        // Vault — optional Obsidian export (manual approve)
+        PanelSeparator {}
+        Text { text: "Vault"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        SmallToggle {
+          width: parent.width
+          label: "Obsidian export"
+          description: root.ffSettings.obsidianEnabled ? (root.ffSettings.obsidianVaultPath || "no path set") : "Push done tasks on approve"
+          checked: root.ffSettings.obsidianEnabled === true
+          onClicked: { root.ff.state.settings.obsidianEnabled = !root.ffSettings.obsidianEnabled; root.ff.saveState(); root.ff.applyTickState() }
+        }
+        Column {
+          width: parent.width
+          spacing: Style.space(2)
+          visible: root.ffSettings.obsidianEnabled === true
+          Row {
+            width: parent.width
+            spacing: Style.spacing.controlPaddingX
+            TextField {
+              width: parent.width - fileField.width - Style.spacing.controlPaddingX
+              placeholderText: "Vault path e.g. ~/ObsidianVault"
+              text: root.ffSettings.obsidianVaultPath || ""
+              onAccepted: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
+              onEditingFinished: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
+            }
+            TextField {
+              id: fileField
+              width: 110
+              placeholderText: "FlowFocus.md"
+              text: root.ffSettings.obsidianFile || "FlowFocus.md"
+              onAccepted: { root.ff.state.settings.obsidianFile = text.trim().slice(0,100) || "FlowFocus.md"; root.ff.saveState(); root.ff.applyTickState() }
+              onEditingFinished: { root.ff.state.settings.obsidianFile = text.trim().slice(0,100) || "FlowFocus.md"; root.ff.saveState(); root.ff.applyTickState() }
+            }
+          }
+          Row {
+            width: parent.width
+            spacing: Style.spacing.controlPaddingX
+            Button {
+              text: "Push all"
+              foreground: Color.accent
+              enabled: (root.state.tasks.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length > 0) && !!root.ffSettings.obsidianVaultPath
+              onClicked: root.ff.pushAllDoneToObsidian()
+            }
+            Text {
+              text: {
+                var pending = root.state.tasks.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length
+                var total = root.state.tasks.length
+                if (!root.ffSettings.obsidianVaultPath) return "set vault path"
+                if (pending === 0 && total > 0) return "all pushed ✓ · " + (root.ffSettings.obsidianFile || "FlowFocus.md")
+                return pending + "/" + total + " pending · " + (root.ffSettings.obsidianFile || "FlowFocus.md")
               }
-              root.ff.saveState()
-              root.ff.applyTickState()
+              color: Color.muted
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              anchors.verticalCenter: parent.verticalCenter
+              elide: Text.ElideRight
+              width: parent.width - 110 - parent.spacing
             }
-            width: parent.width - 110 - parent.spacing
-            anchors.verticalCenter: parent.verticalCenter
-          }
-        }
-
-        Row {
-          width: parent.width
-          spacing: Style.spacing.controlPaddingX
-          
-          Text {
-            text: "Break (" + Math.round(root.ffSettings.shortBreakSec / 60) + "m)"
-            color: Color.popups.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
-            anchors.verticalCenter: parent.verticalCenter
-            width: 110
-          }
-
-          Slider {
-            from: 1
-            to: 25
-            stepSize: 1
-            value: root.ffSettings.shortBreakSec / 60
-            onMoved: {
-              root.ff.state.settings.shortBreakSec = Math.floor(value * 60)
-              if (root.ff.isStopped && root.ff.phase === Model.PHASE_SHORT_BREAK) {
-                root.ff.state.timer.remainingSec = root.ff.state.settings.shortBreakSec
-                root.ff.state.timer.phaseDurationSec = root.ff.state.settings.shortBreakSec
-              }
-              root.ff.saveState()
-              root.ff.applyTickState()
-            }
-            width: parent.width - 110 - parent.spacing
-            anchors.verticalCenter: parent.verticalCenter
           }
         }
 
@@ -423,13 +506,15 @@ Panel {
         height: root.kanbanMode ? kanbanContainer.height : plainList.height
         implicitHeight: root.kanbanMode ? kanbanContainer.implicitHeight : plainList.implicitHeight
 
-        // Plain list mode
+        // Plain list mode — vertical scroll when many tasks (cap so panel doesn't blow tall)
         ListView {
           id: plainList
           visible: !root.kanbanMode
           width: parent.width
-          height: contentHeight
-          interactive: false
+          height: Math.min(contentHeight, Style.space(root.settingsVisible ? 220 : 320))
+          interactive: true
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
           model: root.state.tasks
           spacing: 4
 
@@ -489,7 +574,7 @@ Panel {
                 font.strikeout: task.done
                 elide: Text.ElideRight
                 wrapMode: Text.NoWrap
-                width: parent.width - checkBox.width - focusBtn.width - moveBtn.width - delBtn.width - parent.spacing * 4
+                width: parent.width - checkBox.width - focusBtn.width - moveBtn.width - vaultBtn.width - delBtn.width - parent.spacing * 5
                 anchors.verticalCenter: parent.verticalCenter
               }
 
@@ -509,6 +594,26 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
               }
 
+              // Vault push — any column, manual approve; shows ✓ when already pushed in this column (re-push allowed after moving to Done)
+              Text {
+                id: vaultBtn
+                visible: root.ffSettings.obsidianEnabled === true
+                text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "✓" : "⬆"
+                color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.muted : Color.accent
+                font.pixelSize: Style.font.body
+                font.bold: true
+                width: visible ? 18 : 0
+                horizontalAlignment: Text.AlignHCenter
+                anchors.verticalCenter: parent.verticalCenter
+                MouseArea {
+                  anchors.fill: parent
+                  anchors.margins: -4
+                  cursorShape: (task.pushedToObsidian && task.pushedColumn === task.column) ? Qt.ArrowCursor : Qt.PointingHandCursor
+                  enabled: parent.visible && !(task.pushedToObsidian && task.pushedColumn === task.column)
+                  onClicked: root.ff.pushTaskToObsidian(task.id)
+                }
+              }
+
               Button {
                 id: delBtn
                 text: "✕"
@@ -520,12 +625,13 @@ Panel {
           }
         }
 
-        // Kanban mode — wider columns, breathing room, horizontal scroll
+        // Kanban mode — horizontal scroll for columns + per-column vertical scroll for overflow (todo with many cards)
+        // Outer keeps horizontal flick; vertical overflow is per-column Flickable so todo's extra cards aren't clipped.
         Flickable {
           id: kanbanContainer
           visible: root.kanbanMode
           width: parent.width
-          height: Math.min(contentHeight, Style.space(280))
+          height: Math.min(contentHeight, Style.space(root.settingsVisible ? 200 : 300))
           contentWidth: kanbanRow.implicitWidth
           contentHeight: kanbanRow.implicitHeight
           clip: true
@@ -547,15 +653,30 @@ Panel {
                 spacing: Style.space(3)
 
                 Text {
-                  text: Model.COLUMN_LABELS[colId]
+                  text: Model.COLUMN_LABELS[colId] + " (" + Model.tasksByColumn(root.state, colId).length + ")"
                   color: Color.muted
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                   font.bold: true
                 }
 
-                Repeater {
-                  model: Model.tasksByColumn(root.state, colId)
+                // Per-column vertical scroll so todo with 20+ cards isn't invisible beyond 180px cap
+                Flickable {
+                  width: parent.width
+                  height: Math.min(colTasks.implicitHeight, Style.space(root.settingsVisible ? 150 : 240))
+                  contentHeight: colTasks.implicitHeight
+                  contentWidth: width
+                  clip: true
+                  flickableDirection: Flickable.VerticalFlick
+                  boundsBehavior: Flickable.StopAtBounds
+
+                  Column {
+                    id: colTasks
+                    width: parent.width
+                    spacing: 4
+
+                    Repeater {
+                      model: Model.tasksByColumn(root.state, colId)
 
                   delegate: Rectangle {
                     required property var modelData
@@ -586,6 +707,7 @@ Panel {
                         spacing: 4
 
                         Text {
+                          visible: root.ffSettings.showPomodoros !== false
                           text: task.pomodorosSpent + "/" + task.pomodorosEstimated + " 🍅"
                           color: Color.muted
                           font.family: Style.font.family
@@ -631,6 +753,24 @@ Panel {
                           }
                         }
 
+                        // Vault push — any column, manual approve; shows ✓ when already pushed in this column (re-push allowed after moving to Done)
+                        Text {
+                          visible: root.ffSettings.obsidianEnabled === true
+                          text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "✓" : "⬆"
+                          color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.muted : Color.accent
+                          font.pixelSize: Style.font.body
+                          font.bold: true
+                          anchors.right: parent.right
+                          anchors.rightMargin: 18
+                          anchors.verticalCenter: parent.verticalCenter
+                          MouseArea {
+                            anchors.fill: parent
+                            anchors.margins: -6
+                            cursorShape: (task.pushedToObsidian && task.pushedColumn === task.column) ? Qt.ArrowCursor : Qt.PointingHandCursor
+                            enabled: parent.visible && !(task.pushedToObsidian && task.pushedColumn === task.column)
+                            onClicked: root.ff.pushTaskToObsidian(task.id)
+                          }
+                        }
                         // X = delete task (kanban) — anchored right, not overflowing
                         Text {
                           text: "✕"
@@ -670,8 +810,10 @@ Panel {
             }
           }
         }
+        }
       }
     }
+  }
   }
 
   // ---- Helpers ----

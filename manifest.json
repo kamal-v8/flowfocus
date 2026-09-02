@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "flowfocus",
   "name": "flowfocus",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "author": "kamal",
   "description": "Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
   "kinds": [
@@ -24,10 +24,16 @@
       "longBreakInterval": 4,
       "tickEnabled": false,
       "tickVolume": 0.3,
+      "alarmEnabled": true,
+      "alarmVolume": 0.5,
       "kanbanMode": false,
+      "showPomodoros": true,
       "autoStartBreaks": false,
       "autoStartWork": false,
-      "notificationsEnabled": true
+      "notificationsEnabled": true,
+      "obsidianEnabled": false,
+      "obsidianVaultPath": "",
+      "obsidianFile": "FlowFocus.md"
     },
     "schema": [
       {
@@ -61,9 +67,24 @@
         "label": "Tick volume (0.0-1.0)"
       },
       {
+        "key": "alarmEnabled",
+        "type": "bool",
+        "label": "Alarm sound on phase end"
+      },
+      {
+        "key": "alarmVolume",
+        "type": "real",
+        "label": "Alarm volume (0.0-1.0)"
+      },
+      {
         "key": "kanbanMode",
         "type": "bool",
         "label": "Use kanban board instead of plain list"
+      },
+      {
+        "key": "showPomodoros",
+        "type": "bool",
+        "label": "Show pomodoro counter on kanban cards"
       },
       {
         "key": "autoStartBreaks",
@@ -79,6 +100,21 @@
         "key": "notificationsEnabled",
         "type": "bool",
         "label": "Desktop notifications on phase end"
+      },
+      {
+        "key": "obsidianEnabled",
+        "type": "bool",
+        "label": "Push done tasks to Obsidian (manual approve)"
+      },
+      {
+        "key": "obsidianVaultPath",
+        "type": "string",
+        "label": "Obsidian vault path (e.g. ~/Documents/ObsidianVault)"
+      },
+      {
+        "key": "obsidianFile",
+        "type": "string",
+        "label": "Obsidian file name (inside vault)"
       }
     ]
   }

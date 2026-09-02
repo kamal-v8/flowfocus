@@ -41,10 +41,16 @@ function defaultState() {
       longBreakInterval: 4,
       tickEnabled: false,
       tickVolume: 0.3,
+      alarmEnabled: true,
+      alarmVolume: 0.5,
       kanbanMode: false,
+      showPomodoros: true,
       autoStartBreaks: false,
       autoStartWork: false,
-      notificationsEnabled: true
+      notificationsEnabled: true,
+      obsidianEnabled: false,
+      obsidianVaultPath: "",
+      obsidianFile: "FlowFocus.md"
     }
   }
 }
@@ -80,6 +86,17 @@ function mergeDefaults(state, defaults) {
   s.longBreakSec = Math.max(60, Math.min(3600, Number(s.longBreakSec) || 900))
   s.longBreakInterval = Math.max(1, Math.min(12, Math.floor(Number(s.longBreakInterval) || 4)))
   s.tickVolume = Math.max(0, Math.min(1, Number(s.tickVolume) || 0.3))
+  if (s.alarmEnabled === undefined) s.alarmEnabled = true
+  else s.alarmEnabled = !!s.alarmEnabled
+  s.alarmVolume = Math.max(0, Math.min(1, Number(s.alarmVolume) || 0.5))
+  if (s.showPomodoros === undefined) s.showPomodoros = true
+  else s.showPomodoros = !!s.showPomodoros
+  if (s.obsidianEnabled === undefined) s.obsidianEnabled = false
+  else s.obsidianEnabled = !!s.obsidianEnabled
+  if (typeof s.obsidianVaultPath !== "string") s.obsidianVaultPath = ""
+  else s.obsidianVaultPath = s.obsidianVaultPath.trim().slice(0, 500)
+  if (typeof s.obsidianFile !== "string" || !s.obsidianFile.trim()) s.obsidianFile = "FlowFocus.md"
+  else s.obsidianFile = s.obsidianFile.trim().slice(0, 100).replace(/[\/\\]/g, "_")
   // sanitize tasks
   result.tasks = result.tasks.filter(function(t) {
     return t && typeof t.text === "string" && t.text.trim().length > 0
@@ -91,6 +108,10 @@ function mergeDefaults(state, defaults) {
     t.done = !!t.done
     if (typeof t.pomodorosSpent !== "number") t.pomodorosSpent = 0
     if (typeof t.pomodorosEstimated !== "number") t.pomodorosEstimated = 1
+    if (typeof t.pushedToObsidian !== "boolean") t.pushedToObsidian = !!t.pushedToObsidian
+    if (t.pushedAt && typeof t.pushedAt !== "string") t.pushedAt = null
+    if (t.pushedColumn && typeof t.pushedColumn !== "string") t.pushedColumn = null
+    if (t.pushedColumn && COLUMNS.indexOf(t.pushedColumn) === -1) t.pushedColumn = null
   }
   // sanitize timer
   var tm = result.timer
@@ -254,6 +275,8 @@ function addTask(state, text, column) {
     done: col === "done",
     pomodorosSpent: 0,
     pomodorosEstimated: 1,
+    pushedToObsidian: false,
+    pushedAt: null,
     createdAt: new Date().toISOString()
   }
   state.tasks.push(task)
@@ -315,6 +338,18 @@ function setActiveTask(state, id) {
   return state
 }
 
+function markTaskPushed(state, id) {
+  for (var i = 0; i < state.tasks.length; i++) {
+    if (state.tasks[i].id === id) {
+      state.tasks[i].pushedToObsidian = true
+      state.tasks[i].pushedAt = new Date().toISOString()
+      state.tasks[i].pushedColumn = state.tasks[i].column
+      break
+    }
+  }
+  return state
+}
+
 function tasksByColumn(state, column) {
   return state.tasks.filter(function(t) { return t.column === column })
 }
@@ -343,13 +378,13 @@ function sanitizePluginDir(dir) {
 function tickSoundPath(pluginDir) {
   var safe = sanitizePluginDir(pluginDir)
   if (!safe) return ""
-  return safe + "/sounds/tick.wav"
+  return safe + "/sounds/tick.ogg"
 }
 
 function alarmSoundPath(pluginDir) {
   var safe = sanitizePluginDir(pluginDir)
   if (!safe) return ""
-  return safe + "/sounds/alarm.wav"
+  return safe + "/sounds/alarm.ogg"
 }
 
 function playTick(pluginDir, volume) {
@@ -377,6 +412,63 @@ function notificationArgs(headline, body) {
 function sendNotification(state, headline, body) {
   if (!state.settings.notificationsEnabled) return
   Quickshell.execDetached(notificationArgs(headline, body))
+}
+
+function sanitizeVaultPath(p) {
+  if (!p || typeof p !== "string") return ""
+  var s = p.trim()
+  if (!s) return ""
+  if (s.indexOf("..") !== -1) return ""
+  if (s.length > 500) s = s.slice(0, 500)
+  // block shell metachars: ; & | $ ` * ? < > ^ ( ) { } [ ] \ ' " newline — vault path should be plain filesystem path
+  if (/[;\n`$&|*?<>^(){}[\]\\'"]/.test(s)) return ""
+  // allow only printable safe chars (path safe) — reject control chars
+  if (/[\x00-\x1F\x7F]/.test(s)) return ""
+  return s
+}
+
+function obsidianFilePath(settings, vaultPath) {
+  var vp = sanitizeVaultPath(vaultPath || settings.obsidianVaultPath || "")
+  if (!vp) return ""
+  // expand ~ via Quickshell.env HOME if needed at call site; here keep as-is
+  var file = settings.obsidianFile || "FlowFocus.md"
+  file = String(file).trim() || "FlowFocus.md"
+  file = file.replace(/[\/\\]/g, "_").slice(0, 100)
+  if (!file.toLowerCase().endsWith(".md")) file += ".md"
+  // join with /
+  if (vp.endsWith("/")) return vp + file
+  return vp + "/" + file
+}
+
+function appendTaskToVault(pluginDir, settings, task, vaultPath) {
+  if (!settings.obsidianEnabled) return false
+  var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
+  if (!vp) return false
+  // expand ~ to HOME
+  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
+  else if (vp === "~") vp = Quickshell.env("HOME") || ""
+  if (!vp) return false
+  var file = obsidianFilePath(settings, vp)
+  if (!file) return false
+  var now = new Date()
+  var date = now.toISOString().slice(0,10)
+  var time = now.toTimeString().slice(0,5)
+  var text = String(task.text || "").replace(/"/g, "'").replace(/\n/g, " ").slice(0,200)
+  var col = String(task.column || "todo")
+  if (COLUMNS.indexOf(col) === -1) col = "todo"
+  var label = COLUMN_LABELS[col] || col
+  var isDone = task.done === true || col === "done"
+  var idTag = "<!-- " + task.id + " -->"
+  var line = "- [" + (isDone ? "x" : " ") + "] " + text + " [" + label + "] — " + date + " " + time + " " + idTag
+  var escFile = file.replace(/"/g, '\\"')
+  var escLine = line.replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`")
+  var escId = idTag.replace(/"/g, '\\"')
+  // idempotent: remove any existing line for this id before appending (prevents duplicates on re-push after column change)
+  var cmd = "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && touch \"" + escFile + "\" && "
+      + "grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\"; "
+      + "printf '%s\\n' \"" + escLine + "\" >> \"" + escFile + "\""
+  Quickshell.execDetached(["bash", "-c", cmd])
+  return true
 }
 
 if (typeof module !== "undefined") {
@@ -419,6 +511,10 @@ if (typeof module !== "undefined") {
     alarmSoundPath: alarmSoundPath,
     playTick: playTick,
     playCompleteSound: playCompleteSound,
-    sendNotification: sendNotification
+    sendNotification: sendNotification,
+    sanitizeVaultPath: sanitizeVaultPath,
+    obsidianFilePath: obsidianFilePath,
+    appendTaskToVault: appendTaskToVault,
+    markTaskPushed: markTaskPushed
   }
 }

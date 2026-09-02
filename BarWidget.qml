@@ -73,8 +73,8 @@ BarWidget {
   function syncSettingsFromShellJson() {
     var s = root.state.settings
     var keys = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval",
-                "tickEnabled", "tickVolume", "kanbanMode", "autoStartBreaks",
-                "autoStartWork", "notificationsEnabled"]
+                "tickEnabled", "tickVolume", "alarmEnabled", "alarmVolume", "kanbanMode", "showPomodoros", "autoStartBreaks",
+                "autoStartWork", "notificationsEnabled", "obsidianEnabled", "obsidianVaultPath", "obsidianFile"]
     var changed = false
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i]
@@ -82,8 +82,9 @@ BarWidget {
       if (val === undefined || val === null) continue
       // coerce numeric types from shell.json schema (int/real may come as number or string)
       if (["workSec","shortBreakSec","longBreakSec","longBreakInterval"].indexOf(key) !== -1) val = Math.floor(Number(val))
-      if (key === "tickVolume") val = Number(val)
-      if (["tickEnabled","kanbanMode","autoStartBreaks","autoStartWork","notificationsEnabled"].indexOf(key) !== -1) val = !!val
+      if (key === "tickVolume" || key === "alarmVolume") val = Number(val)
+      if (["tickEnabled","alarmEnabled","kanbanMode","showPomodoros","autoStartBreaks","autoStartWork","notificationsEnabled","obsidianEnabled"].indexOf(key) !== -1) val = !!val
+      if (key === "obsidianVaultPath" || key === "obsidianFile") val = String(val || "")
       if (s[key] !== val) {
         s[key] = val
         changed = true
@@ -100,6 +101,14 @@ BarWidget {
   }
 
   // ---- Timer ticking ----
+  // alarm.wav is 30s long. While it plays we mute ticks, otherwise in
+  // continuous mode the next phase's tick.wav overlaps the alarm.
+  Timer {
+    id: alarmMuteTimer
+    interval: 30000
+    repeat: false
+  }
+
   Timer {
     id: tickTimer
     interval: 1000
@@ -108,28 +117,27 @@ BarWidget {
     onTriggered: root.onTick()
   }
 
-  // Tick sound timer — fires once per second while running + tickEnabled
-  Timer {
-    id: soundTimer
-    interval: 1000
-    repeat: true
-    running: root.isRunning && root.ffSettings.tickEnabled
-    onTriggered: Model.playTick(root.pluginDir, root.ffSettings.tickVolume)
-  }
-
   function onTick() {
     var result = Model.tick(root.state)
+    var phaseEnded = result.phaseEnded
     root.state = result.state
 
-    if (result.phaseEnded) {
+    if (phaseEnded) {
       var finished = result.finishedPhase
       var label = Model.phaseLabel(finished)
       var next = Model.phaseLabel(root.state.timer.phase)
       Model.sendNotification(root.state, label + " complete", "Time for " + next.toLowerCase())
-      Model.playCompleteSound(root.pluginDir, 0.5)
-
+      if (root.state.settings.alarmEnabled !== false) {
+        alarmMuteTimer.restart()
+        Model.playCompleteSound(root.pluginDir, root.state.settings.alarmVolume)
+      }
       if (Model.shouldAutoStart(root.state)) {
         root.state = Model.startTimer(root.state)
+      }
+      // do NOT play tick on the same second as alarm
+    } else {
+      if (root.ffSettings.tickEnabled && !alarmMuteTimer.running) {
+        Model.playTick(root.pluginDir, root.ffSettings.tickVolume)
       }
     }
 
@@ -215,6 +223,48 @@ BarWidget {
     root.state = Model.setActiveTask(root.state, id)
     root.saveState()
     root.applyTickState()
+  }
+
+  function pushTaskToObsidian(id) {
+    var task = null
+    for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
+    if (!task) return false
+    // allow re-push if column changed (e.g. todo → done) so Done becomes [x] after being pushed as [ ]
+    if (task.pushedToObsidian && task.pushedColumn === task.column) {
+      Model.sendNotification(root.state, "Already pushed", task.text.slice(0,60) + " ✓ [" + task.column + "]")
+      return false
+    }
+    var ok = Model.appendTaskToVault(root.pluginDir, root.state.settings, task)
+    if (ok) {
+      root.state = Model.markTaskPushed(root.state, id)
+      root.saveState()
+      root.applyTickState()
+      Model.sendNotification(root.state, "Pushed to Obsidian ✓", task.text.slice(0,60))
+    } else {
+      Model.sendNotification(root.state, "Obsidian not configured", "Set vault path in Settings")
+    }
+    return ok
+  }
+
+  function pushAllDoneToObsidian() {
+    // pushes any not-yet-pushed tasks, or tasks whose column changed since last push (e.g. todo [ ] → done [x])
+    var pending = root.state.tasks.filter(function(t){ return !t.pushedToObsidian || t.pushedColumn !== t.column })
+    if (pending.length === 0) {
+      if (root.state.tasks.length > 0) Model.sendNotification(root.state, "All tasks already pushed ✓", "")
+      else Model.sendNotification(root.state, "Nothing to push", "No tasks")
+      return 0
+    }
+    var count = 0
+    for (var i = 0; i < pending.length; i++) {
+      if (Model.appendTaskToVault(root.pluginDir, root.state.settings, pending[i])) {
+        root.state = Model.markTaskPushed(root.state, pending[i].id)
+        count++
+      }
+    }
+    root.saveState()
+    root.applyTickState()
+    if (count > 0) Model.sendNotification(root.state, "Pushed " + count + " tasks to Obsidian ✓", root.state.settings.obsidianVaultPath)
+    return count
   }
 
   // ---- Popup panel ----
