@@ -2,6 +2,8 @@
 
 Pomodoro timer + To-Do list for [Omarchy](https://omarchy.org) — a single bar widget with a rich popup panel.
 
+![Flowfocus Preview](assets/preview.png)
+
 * **Pomodoro cycle** — Work / Short break / Long break (default `25/5/15` min, every 4 cycles), pause / resume / reset / skip, cycle counter, deadline-based timing that survives bar reloads.
 * **Tick sound** — optional soft `tik-tik` every second while the timer runs, toggleable with volume slider (0–1). Source is the *Focus Timer* flatpak’s `clock.ogg` (`io.github.focustimerhq.FocusTimer`).
 * **To-Do** — plain list or Kanban (`Backlog / To Do / Doing / Done`). Plain shows a custom checkbox row with `☐ done • ○ focus/● active • → move column • ✕ delete`. Kanban shows 4 × `124px` columns in a `520px` wide board (horizontal scroll) with `← →` to move and `✕` to delete. `Space` toggles start/pause when the panel has focus.
