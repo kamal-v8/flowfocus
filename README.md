@@ -77,7 +77,7 @@ Example `shell.json` entry:
 
 ## Sounds
 
-* `sounds/tick.wav` — `0.35s` slice of `clock.ogg` from the *Focus Timer* flatpak (`io.github.focustimerhq.FocusTimer` at `/var/lib/flatpak/.../share/focus-timer/sounds/clock.ogg`), boosted `+2dB`. Earlier prototypes used YouTube slices from `y-FJZSaFh80` (old clock) but the flatpak’s mechanical tick was cleaner. Played via `pw-play --volume <0–1>` once per second by a `Timer` (`1000ms`).
+* `sounds/tick.wav` — 1s slice from YouTube video `Qgsy8BEsLzg` (Clock Ticking Noise for STUDYING | RELAXING | MEDITATION). Played via `pw-play --volume <0–1>` once per second by a `Timer` (`1000ms`).
 * `sounds/alarm.wav` — `30.01s` slice `0:00–0:30` from `https://youtu.be/s8E_Ggf_QsQ` (“1800's Grandfather Clock”, 8 h) cut with `yt-dlp --download-sections "*0:00-0:30"` and used for `playCompleteSound` on phase end. Play it manually with `pw-play --volume 0.5 ~/.config/omarchy/plugins/flowfocus/sounds/alarm.wav` (or `paplay`).
 
 Replace either file in place and `omarchy restart shell` to use your own sound.
