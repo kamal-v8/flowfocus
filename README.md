@@ -6,7 +6,7 @@ Pomodoro timer + To-Do list for [Omarchy](https://omarchy.org) — a single bar 
 * **Tick sound** — optional soft `tik-tik` every second while the timer runs, toggleable with volume slider (0–1). Source is the *Focus Timer* flatpak’s `clock.ogg` (`io.github.focustimerhq.FocusTimer`).
 * **To-Do** — plain list or Kanban (`Backlog / To Do / Doing / Done`). Plain shows a custom checkbox row with `☐ done • ○ focus/● active • → move column • ✕ delete`. Kanban shows 4 × `124px` columns in a `520px` wide board (horizontal scroll) with `← →` to move and `✕` to delete. `Space` toggles start/pause when the panel has focus.
 * **Alarm** — 30 s grandfather-clock chime from `https://youtu.be/s8E_Ggf_QsQ` played once on phase end via `pw-play`, plus an `omarchy-notification-send` desktop notification.
-* **Bar presence** — idle: large `` icon only; running: progress ring + `MM:SS` with phase color (`accent` = work, `muted` = break, `urgent` = long break). `SUPER + ALT + T` toggles the popup.
+* **Bar presence** — idle: large `` icon only; running: progress ring + `MM:SS` with phase color (`accent` = work, `muted` = break, `urgent` = long break). `SUPER + SHIFT + T` toggles the popup.
 
 ## Install
 
@@ -40,7 +40,7 @@ Or copy the directory and add this to `~/.config/omarchy/shell.json`:
 * **Click** bar icon → open/close panel
 * **Right-click** bar icon → start / pause
 * **Middle-click** → reset
-* **SUPER + ALT + T** → toggle panel (bound in `~/.config/hypr/bindings.lua`)
+* **SUPER + SHIFT + T** → toggle panel (bound in `~/.config/hypr/bindings.lua`)
 * **Space** (panel focused) → start / pause
 
 Inside the panel:
@@ -103,7 +103,7 @@ Note: `omarchy-shell shell call flowfocus ...` goes through `shell.callIfLoaded`
 Hyprland binding (installed automatically if you keep `~/.config/hypr/bindings.lua` from this repo):
 
 ```lua
-o.bind("SUPER + ALT + T", "flowfocus", "qs ipc -n -p $OMARCHY_PATH/shell call flowfocus togglePanel")
+o.bind("SUPER + SHIFT + T", "flowfocus", "qs ipc -n -p $OMARCHY_PATH/shell call flowfocus togglePanel")
 ```
 
 ## Development
