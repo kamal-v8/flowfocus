@@ -387,19 +387,35 @@ function alarmSoundPath(pluginDir) {
   return safe + "/sounds/alarm.ogg"
 }
 
+function tickWavPath(pluginDir) {
+  var safe = sanitizePluginDir(pluginDir)
+  if (!safe) return ""
+  return safe + "/sounds/tick.wav"
+}
+
+function alarmWavPath(pluginDir) {
+  var safe = sanitizePluginDir(pluginDir)
+  if (!safe) return ""
+  return safe + "/sounds/alarm.wav"
+}
+
 function playTick(pluginDir, volume) {
   var vol = Math.max(0, Math.min(1, Number(volume) || 0))
   if (vol <= 0) return
   var p = tickSoundPath(pluginDir)
+  var fallback = tickWavPath(pluginDir)
   if (!p) return
-  Quickshell.execDetached(["pw-play", "--volume", String(vol), p])
+  // try ogg then wav (pw-play handles both, paplay fallback for pulse)
+  Quickshell.execDetached(["bash", "-c", "pw-play --volume " + String(vol) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || pw-play --volume " + String(vol) + " \"" + fallback.replace(/"/g, '\\"') + "\" 2>/dev/null || paplay --volume " + Math.round(vol*65536) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || true"])
 }
 
 function playCompleteSound(pluginDir, volume) {
   var vol = Math.max(0, Math.min(1, Number(volume) || 0.5))
+  if (vol === 0) return
   var p = alarmSoundPath(pluginDir)
+  var fallback = alarmWavPath(pluginDir)
   if (!p) return
-  Quickshell.execDetached(["pw-play", "--volume", String(vol), p])
+  Quickshell.execDetached(["bash", "-c", "pw-play --volume " + String(vol) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || pw-play --volume " + String(vol) + " \"" + fallback.replace(/"/g, '\\"') + "\" 2>/dev/null || paplay --volume " + Math.round(vol*65536) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || true"])
 }
 
 function notificationArgs(headline, body) {
