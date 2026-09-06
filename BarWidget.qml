@@ -73,8 +73,8 @@ BarWidget {
   function syncSettingsFromShellJson() {
     var s = root.state.settings
     var keys = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval",
-                "tickEnabled", "tickVolume", "alarmEnabled", "alarmVolume", "kanbanMode", "showPomodoros", "autoStartBreaks",
-                "autoStartWork", "notificationsEnabled", "obsidianEnabled", "obsidianVaultPath", "obsidianFile"]
+                "tickEnabled", "tickVolume", "alarmEnabled", "alarmVolume", "soundMuted", "kanbanMode", "showPomodoros", "autoStartBreaks",
+                "autoStartWork", "notificationsEnabled", "obsidianEnabled", "obsidianVaultPath"]
     var changed = false
     for (var i = 0; i < keys.length; i++) {
       var key = keys[i]
@@ -83,8 +83,8 @@ BarWidget {
       // coerce numeric types from shell.json schema (int/real may come as number or string)
       if (["workSec","shortBreakSec","longBreakSec","longBreakInterval"].indexOf(key) !== -1) val = Math.floor(Number(val))
       if (key === "tickVolume" || key === "alarmVolume") val = Number(val)
-      if (["tickEnabled","alarmEnabled","kanbanMode","showPomodoros","autoStartBreaks","autoStartWork","notificationsEnabled","obsidianEnabled"].indexOf(key) !== -1) val = !!val
-      if (key === "obsidianVaultPath" || key === "obsidianFile") val = String(val || "")
+      if (["tickEnabled","alarmEnabled","soundMuted","kanbanMode","showPomodoros","autoStartBreaks","autoStartWork","notificationsEnabled","obsidianEnabled"].indexOf(key) !== -1) val = !!val
+      if (key === "obsidianVaultPath") val = String(val || "")
       if (s[key] !== val) {
         s[key] = val
         changed = true
@@ -127,7 +127,7 @@ BarWidget {
       var label = Model.phaseLabel(finished)
       var next = Model.phaseLabel(root.state.timer.phase)
       Model.sendNotification(root.state, label + " complete", "Time for " + next.toLowerCase())
-      if (root.state.settings.alarmEnabled !== false) {
+      if (root.state.settings.alarmEnabled !== false && !root.state.settings.soundMuted) {
         alarmMuteTimer.restart()
         Model.playCompleteSound(root.pluginDir, root.state.settings.alarmVolume)
       }
@@ -136,7 +136,7 @@ BarWidget {
       }
       // do NOT play tick on the same second as alarm
     } else {
-      if (root.ffSettings.tickEnabled && !alarmMuteTimer.running) {
+      if (root.ffSettings.tickEnabled && !root.ffSettings.soundMuted && !alarmMuteTimer.running) {
         Model.playTick(root.pluginDir, root.ffSettings.tickVolume)
       }
     }
@@ -188,6 +188,14 @@ BarWidget {
     root.applyTickState()
   }
 
+  // Master mute — silences tick + alarm AND kills any sound already playing.
+  function toggleMute() {
+    root.state.settings.soundMuted = !root.state.settings.soundMuted
+    if (root.state.settings.soundMuted) Model.stopAllSounds(root.pluginDir)
+    root.saveState()
+    root.applyTickState()
+  }
+
   // ---- Task controls ----
   function addTask(text, column) {
     root.state = Model.addTask(root.state, text, column)
@@ -201,11 +209,18 @@ BarWidget {
     root.applyTickState()
   }
 
+  function isNotesLinked() {
+    return root.state.settings.obsidianEnabled === true
+        && Model.expandVaultPath(root.state.settings, undefined) !== ""
+  }
+
   function deleteTask(id) {
-    // if task was pushed to vault, remove it there too (per-profile file, keeps vault in sync)
+    // Removes from board AND from notes (by id tag) when a vault is linked.
+    // Always attempts vault removal — grep -v is a harmless no-op when no
+    // line exists, and removeTaskFromVault bails early with no vault path.
     var task = null
     for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
-    if (task && task.pushedToObsidian) {
+    if (task) {
       var prof = Model.getProfileById(root.state, task.profileId || "default")
       var profName = prof ? prof.name : (task.profileId || "Default")
       Model.removeTaskFromVault(root.pluginDir, root.state.settings, task, undefined, profName)
@@ -213,6 +228,38 @@ BarWidget {
     root.state = Model.deleteTask(root.state, id)
     root.saveState()
     root.applyTickState()
+  }
+
+  // Archive a finished (Done) task: ensure it exists in the notes file as
+  // "- [x] ..." then remove it from the kanban board WITHOUT touching the
+  // notes file. If the notes app isn't linked, falls back to a plain delete.
+  // Returns true when the board entry was removed.
+  function archiveDoneTask(id) {
+    var task = null
+    for (var j = 0; j < root.state.tasks.length; j++) if (root.state.tasks[j].id === id) { task = root.state.tasks[j]; break }
+    if (!task) return false
+    if (!isNotesLinked()) {
+      root.state = Model.deleteTask(root.state, id)
+      root.saveState()
+      root.applyTickState()
+      return true
+    }
+    var aprof = Model.getProfileById(root.state, task.profileId || "default")
+    var aprofName = aprof ? aprof.name : (task.profileId || "Default")
+    // Force the Done appearance in the vault even if the board row drifted.
+    var snapshot = JSON.parse(JSON.stringify(task))
+    snapshot.column = "done"
+    snapshot.done = true
+    var ok = Model.appendTaskToVault(root.pluginDir, root.state.settings, snapshot, undefined, aprofName)
+    if (!ok) {
+      Model.sendNotification(root.state, "Notes folder not configured", "Set notes path in Settings")
+      return false
+    }
+    root.state = Model.deleteTask(root.state, id)
+    root.saveState()
+    root.applyTickState()
+    Model.sendNotification(root.state, "Archived ✓", task.text.slice(0, 60) + " [x] → " + aprofName)
+    return true
   }
 
   function moveTask(id, column) {
@@ -290,9 +337,9 @@ BarWidget {
       root.state = Model.markTaskPushed(root.state, id)
       root.saveState()
       root.applyTickState()
-      Model.sendNotification(root.state, "Pushed to Obsidian ✓", task.text.slice(0,60) + " [" + task.column + "] → " + profName)
+      Model.sendNotification(root.state, "Pushed to notes ✓", task.text.slice(0,60) + " [" + task.column + "] → " + profName)
     } else {
-      Model.sendNotification(root.state, "Obsidian not configured", "Set vault path in Settings")
+      Model.sendNotification(root.state, "Notes folder not configured", "Set notes path in Settings")
     }
     return ok
   }
@@ -308,7 +355,7 @@ BarWidget {
       root.state = Model.clearTaskPushed(root.state, id)
       root.saveState()
       root.applyTickState()
-      Model.sendNotification(root.state, "Removed from Obsidian ↩", task.text.slice(0,60))
+      Model.sendNotification(root.state, "Removed from notes ↩", task.text.slice(0,60))
     }
     return ok
   }
@@ -334,7 +381,11 @@ BarWidget {
     }
     root.saveState()
     root.applyTickState()
-    if (count > 0) Model.sendNotification(root.state, "Pushed " + count + " tasks to Obsidian ✓", root.state.settings.obsidianVaultPath)
+    if (count > 0) {
+      var dest = Model.obsidianFilePathForProfile(root.state.settings, root.state.settings.obsidianVaultPath, activeId, profName)
+      if (root.home && dest.indexOf(root.home) === 0) dest = "~" + dest.slice(root.home.length)
+      Model.sendNotification(root.state, "Pushed " + count + " tasks to notes ✓", dest)
+    }
     return count
   }
 

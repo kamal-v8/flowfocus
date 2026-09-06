@@ -49,14 +49,14 @@ function defaultState() {
       tickVolume: 0.3,
       alarmEnabled: true,
       alarmVolume: 0.5,
+      soundMuted: false,
       kanbanMode: false,
       showPomodoros: true,
       autoStartBreaks: false,
       autoStartWork: false,
       notificationsEnabled: true,
       obsidianEnabled: false,
-      obsidianVaultPath: "",
-      obsidianFile: "FlowFocus.md"
+      obsidianVaultPath: ""
     }
   }
 }
@@ -160,14 +160,17 @@ function mergeDefaults(state, defaults) {
   if (s.alarmEnabled === undefined) s.alarmEnabled = true
   else s.alarmEnabled = !!s.alarmEnabled
   s.alarmVolume = Math.max(0, Math.min(1, Number(s.alarmVolume) || 0.5))
+  if (s.soundMuted === undefined) s.soundMuted = false
+  else s.soundMuted = !!s.soundMuted
   if (s.showPomodoros === undefined) s.showPomodoros = true
   else s.showPomodoros = !!s.showPomodoros
   if (s.obsidianEnabled === undefined) s.obsidianEnabled = false
   else s.obsidianEnabled = !!s.obsidianEnabled
   if (typeof s.obsidianVaultPath !== "string") s.obsidianVaultPath = ""
   else s.obsidianVaultPath = s.obsidianVaultPath.trim().slice(0, 500)
-  if (typeof s.obsidianFile !== "string" || !s.obsidianFile.trim()) s.obsidianFile = "FlowFocus.md"
-  else s.obsidianFile = s.obsidianFile.trim().slice(0, 100).replace(/[\/\\]/g, "_")
+  // NOTE: settings.obsidianFile is retired since v1.5 (filenames are now
+  // derived from the space name). A stale value may still ride along in
+  // saved state; it is only used to locate legacy files for migration.
   // sanitize kanban profiles
   result.kanbanProfiles = result.kanbanProfiles.filter(function(p){ return p && typeof p.name === "string" && p.name.trim().length>0 && typeof p.id === "string" && p.id.trim().length>0 }).slice(0, 20)
   if (result.kanbanProfiles.length === 0) result.kanbanProfiles = defaultKanbanProfiles()
@@ -513,20 +516,25 @@ function clearTaskPushed(state, id) {
 
 function removeTaskFromVault(pluginDir, settings, task, vaultPath, profileName) {
   if (!task || !task.id) return false
-  var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
-  if (!vp) return false
-  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
-  else if (vp === "~") vp = Quickshell.env("HOME") || ""
+  var vp = expandVaultPath(settings, vaultPath)
   if (!vp) return false
   var pid = String(task.profileId || "default")
   var pName = profileName
   if (pName === undefined) pName = pid === "default" ? "Default" : pid
-  var file = (pid === "default") ? obsidianFilePath(settings, vp) : obsidianFilePathForProfile(settings, vp, pid, pName)
-  if (!file) return false
+  // strip from the new per-space file and, just in case, from a legacy file
+  var files = [obsidianFilePathForProfile(settings, vp, pid, pName)]
+  var legacy = obsidianLegacyFile(settings, vp, pid, pName)
+  if (legacy && legacy !== files[0]) files.push(legacy)
   var idTag = "<!-- " + task.id + " -->"
-  var escFile = file.replace(/"/g, '\\"')
-  var escId = idTag.replace(/"/g, '\\"')
-  var cmd = "touch \"" + escFile + "\" 2>/dev/null || true; grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\""
+  var escId = idTag.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var cmd = ""
+  for (var i = 0; i < files.length; i++) {
+    if (!files[i]) continue
+    var escFile = files[i].replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    if (i > 0) cmd += "; "
+    cmd += "if [ -e \"" + escFile + "\" ]; then grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\"; fi"
+  }
+  if (!cmd) return false
   Quickshell.execDetached(["bash", "-c", cmd])
   return true
 }
@@ -601,6 +609,16 @@ function playCompleteSound(pluginDir, volume) {
   Quickshell.execDetached(["bash", "-c", "pw-play --volume " + String(vol) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || pw-play --volume " + String(vol) + " \"" + fallback.replace(/"/g, '\\"') + "\" 2>/dev/null || paplay --volume " + Math.round(vol*65536) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || true"])
 }
 
+function stopAllSounds(pluginDir) {
+  // Immediately silence any tick/alarm currently playing.
+  // pw-play/paplay are fire-and-forget, so kill by our sounds-dir path fragment.
+  var safe = sanitizePluginDir(pluginDir)
+  if (!safe) return
+  var base = safe.split("/").pop() || "flowfocus"
+  var pattern = base.replace(/[^a-zA-Z0-9_-]/g, "_") + "/sounds"
+  Quickshell.execDetached(["bash", "-c", "pkill -f \"" + pattern + "\" 2>/dev/null || true"])
+}
+
 function notificationArgs(headline, body) {
   var args = [Quickshell.env("OMARCHY_PATH") + "/bin/omarchy-notification-send", "--app-name", "FocusFlow"]
   if (headline) args.push(headline)
@@ -634,49 +652,86 @@ function sanitizeProfileNameForPath(name) {
   return s.slice(0, 30)
 }
 
-function obsidianFilePath(settings, vaultPath) {
-  var vp = sanitizeVaultPath(vaultPath || settings.obsidianVaultPath || "")
+// All FocusFlow vault data lives under <vault>/focusflow/, one file per
+// kanban space: focusflow/Default.md, focusflow/<Space>.md, ...
+// (This replaced the pre-v1.5 layout: base FlowFocus.md + per-space
+// subfolders. Old files are moved over automatically on first write.)
+var VAULT_SUBDIR = "focusflow"
+
+function expandVaultPath(settings, vaultPath) {
+  var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
   if (!vp) return ""
-  var file = settings.obsidianFile || "FlowFocus.md"
-  file = String(file).trim() || "FlowFocus.md"
-  file = file.replace(/[\/\\]/g, "_").slice(0, 100)
-  if (!file.toLowerCase().endsWith(".md")) file += ".md"
-  if (vp.endsWith("/")) return vp + file
-  return vp + "/" + file
+  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
+  else if (vp === "~") vp = Quickshell.env("HOME") || ""
+  return vp
+}
+
+function profileFileName(profileId, profileName) {
+  var pid = String(profileId || "default")
+  var name = (pid === "default") ? "Default" : sanitizeProfileNameForPath(profileName || pid)
+  // avoid collision if a custom space is literally named "Default"
+  if (pid !== "default" && name.toLowerCase() === "default")
+    name = name + "_" + pid.replace(/[^a-zA-Z0-9]/g, "").slice(-4)
+  return name + ".md"
 }
 
 function obsidianFilePathForProfile(settings, vaultPath, profileId, profileName) {
-  var base = obsidianFilePath(settings, vaultPath)
-  if (!base) return ""
-  var pid = String(profileId || "default")
-  if (pid === "default") return base
-  var vp = sanitizeVaultPath(vaultPath || settings.obsidianVaultPath || "")
-  if (!vp) return base
-  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
-  else if (vp === "~") vp = Quickshell.env("HOME") || ""
-  var sanitized = sanitizeProfileNameForPath(profileName || pid)
+  var vp = expandVaultPath(settings, vaultPath)
+  if (!vp) return ""
+  var dir = vp.endsWith("/") ? vp + VAULT_SUBDIR : vp + "/" + VAULT_SUBDIR
+  return dir + "/" + profileFileName(profileId, profileName)
+}
+
+// Legacy locations from before v1.5 (base file + per-space subfolders).
+// Only used to find files worth migrating; obsidianFile is otherwise retired.
+function obsidianLegacyFile(settings, vpExpanded, profileId, profileName) {
+  if (!vpExpanded) return ""
   var file = settings.obsidianFile || "FlowFocus.md"
   file = String(file).trim() || "FlowFocus.md"
   file = file.replace(/[\/\\]/g, "_").slice(0, 100)
   if (!file.toLowerCase().endsWith(".md")) file += ".md"
-  // per-profile subfolder: vault/ProfileName/file
-  if (vp.endsWith("/")) return vp + sanitized + "/" + file
-  return vp + "/" + sanitized + "/" + file
+  var pid = String(profileId || "default")
+  var sep = vpExpanded.endsWith("/") ? "" : "/"
+  if (pid === "default") return vpExpanded + sep + file
+  var sanitized = sanitizeProfileNameForPath(profileName || pid)
+  return vpExpanded + sep + sanitized + "/" + file
+}
+
+function migrationSnippet(settings, vpExpanded, profileId, profileName) {
+  // One-time move snippet: legacy file -> focusflow/<Space>.md, and only when
+  // the new file doesn't exist yet, so we never clobber or duplicate content.
+  // Returned as shell code so callers run it in the SAME bash invocation as
+  // their write (two execDetached calls could race each other).
+  var pid = String(profileId || "default")
+  var file = obsidianFilePathForProfile(settings, vpExpanded, pid, profileName)
+  if (!file) return { file: "", prefix: "" }
+  var legacy = obsidianLegacyFile(settings, vpExpanded, pid, profileName)
+  if (!legacy || legacy === file) return { file: file, prefix: "" }
+  var escFile = file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var escLegacy = legacy.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var prefix = "if [ ! -e \"" + escFile + "\" ] && [ -e \"" + escLegacy + "\" ]; then "
+      + "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && mv \"" + escLegacy + "\" \"" + escFile + "\"; "
+      + "rmdir \"$(dirname -- \"" + escLegacy + "\")\" 2>/dev/null || true; fi; "
+  return { file: file, prefix: prefix }
+}
+
+function migrateProfileVaultFile(settings, vpExpanded, profileId, profileName) {
+  var r = migrationSnippet(settings, vpExpanded, profileId, profileName)
+  if (!r.file) return ""
+  if (r.prefix) Quickshell.execDetached(["bash", "-c", r.prefix + "true"])
+  return r.file
 }
 
 function appendTaskToVault(pluginDir, settings, task, vaultPath, profileName) {
   if (!settings.obsidianEnabled) return false
-  var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
+  var vp = expandVaultPath(settings, vaultPath)
   if (!vp) return false
-  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
-  else if (vp === "~") vp = Quickshell.env("HOME") || ""
-  if (!vp) return false
-  // per-profile file: Default -> base file, others -> subfolder/ProfileName/file
+  // one file per space under focusflow/: Default.md, <Space>.md, ...
   var pid = String(task.profileId || "default")
   var pName = profileName
   if (pName === undefined) pName = pid === "default" ? "Default" : pid
-  var file = (pid === "default") ? obsidianFilePath(settings, vp) : obsidianFilePathForProfile(settings, vp, pid, pName)
-  if (!file) return false
+  var mig = migrationSnippet(settings, vp, pid, pName)
+  if (!mig.file) return false
   var now = new Date()
   var date = now.toISOString().slice(0,10)
   var time = now.toTimeString().slice(0,5)
@@ -687,11 +742,12 @@ function appendTaskToVault(pluginDir, settings, task, vaultPath, profileName) {
   var isDone = task.done === true || col === "done"
   var idTag = "<!-- " + task.id + " -->"
   var line = "- [" + (isDone ? "x" : " ") + "] " + text + " [" + label + "] — " + date + " " + time + " " + idTag
-  var escFile = file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var escFile = mig.file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
   var escLine = line.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`")
   var escId = idTag.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  // per-profile idempotent: remove existing line for this id before appending
-  var cmd = "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && touch \"" + escFile + "\" && "
+  // single bash invocation: migrate first, then idempotent append (no race)
+  var cmd = mig.prefix
+      + "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && touch \"" + escFile + "\" && "
       + "grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\"; "
       + "printf '%s\\n' \"" + escLine + "\" >> \"" + escFile + "\""
   Quickshell.execDetached(["bash", "-c", cmd])
@@ -753,9 +809,13 @@ if (typeof module !== "undefined") {
     alarmSoundPath: alarmSoundPath,
     playTick: playTick,
     playCompleteSound: playCompleteSound,
+    stopAllSounds: stopAllSounds,
     sendNotification: sendNotification,
     sanitizeVaultPath: sanitizeVaultPath,
-    obsidianFilePath: obsidianFilePath,
+    sanitizeProfileNameForPath: sanitizeProfileNameForPath,
+    obsidianFilePathForProfile: obsidianFilePathForProfile,
+    obsidianLegacyFile: obsidianLegacyFile,
+    migrateProfileVaultFile: migrateProfileVaultFile,
     appendTaskToVault: appendTaskToVault,
     markTaskPushed: markTaskPushed,
     clearTaskPushed: clearTaskPushed,

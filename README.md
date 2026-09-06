@@ -1,4 +1,4 @@
-# FocusFlow v1.4.0 — polished, lightweight
+# FocusFlow v1.5.0 — polished, lightweight
 
 Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — single bar widget, rich popup, minimal resource footprint. Hover shows **FocusFlow**.
 
@@ -6,8 +6,8 @@ Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — s
 
 * **Pomodoro cycle** — Work / Short break / Long break (default `25/5/15` min, every 4 cycles), pause/resume/reset/skip, cycle counter, deadline-based math survives bar reloads. Single `1000ms` tick timer; ticks muted 30s during alarm to avoid overlap in continuous mode.
 * **Sound (lightweight)** — `tick.ogg` (5.3K mono 22k) + `alarm.ogg` (142K mono 22k) + fallback `tick.wav/alarm.wav` mono 22k — was `5.6M` WAV. Played via `pw-play --volume || paplay` with path sanitization (`..` rejected). `tick` every second when enabled, `alarm` once on phase end. Volume sliders now `save+apply` on release.
-* **To-Do** — plain list or Kanban (`132px` cols in `580px` board, horizontal 12px gaps, per-column vertical scroll). Plain: custom `18×18` checkbox. Both support `⬆` push → `↩` undo to Obsidian. `Space` start/pause when panel focused. `▲ ▼` on hover to prioritize within column.
-* **Obsidian vault** — optional manual export per kanban profile. Task → `- [ ] task [To Do] — YYYY-MM-DD HH:MM <!-- id -->` (or `[x]` if `Done`) in `vault/<Profile>/FlowFocus.md` (Default → `vault/FlowFocus.md`). Idempotent `grep -v <!-- id -->`, `✓`→`↩` undo removes line, `Push all` per active profile.
+* **To-Do** — plain list or Kanban (adaptive columns fill the `520px` board, per-column vertical scroll). Plain: custom `18×18` checkbox. Hover pill holds `→ ▲ ▼ ⬆ −`. `Space` start/pause when panel focused.
+* **Notes export (Obsidian or any markdown app)** — optional manual export per kanban profile. Plain Markdown, no Obsidian-only syntax, so Obsidian, Logseq, or any text app can read it. Everything lives under `<folder>/focusflow/`, one file per space: `focusflow/Default.md`, `focusflow/<Space>.md`, … Task → `- [ ] task [To Do] — YYYY-MM-DD HH:MM <!-- id -->` (or `[x]` if `Done`). Idempotent `grep -v <!-- id -->`, `⬆`→`↩` undo removes line, `Push all` per active profile, delete-task also removes from notes. Old locations (`FlowFocus.md`, per-space subfolders) auto-migrate on first write.
 * **Kanban profiles** — `Default` + up to 20 custom spaces (`Kanban — <Space>` heading). `Spaces:` pill tabs + `+` creator, `Rename`/`Delete` (with `Yes/No` confirm). Switch via click or `Alt+H` / `Alt+L` when FocusFlow focused. Each profile isolated tasks, vault files, and counts.
 * **Bar** — idle `` only; running ring + `MM:SS` (`accent` work, `muted` break, `urgent` long break). `SUPER + SHIFT + T` toggles popup.
 * **Compact UI** — `SmallToggle` `32px` 2-col grid, `PanelSlider 95px`, timing side-by-side, vault inline, per-column `Flickable` scroll, capped heights, no `ScrollBar` chrome, left accent `3px` + `●` for active task, `-` delete at top-right `z:10`.
@@ -49,7 +49,6 @@ State: `~/.local/state/omarchy/focusflow.json` (`XDG_STATE_HOME` honoured, atomi
 | `notificationsEnabled` | bool | true |  |
 | `obsidianEnabled` | bool | false |  |
 | `obsidianVaultPath` | string | "" | `~/ObsidianVault`, `..`/`;`/`$`/`&`/`|`/`*`/`?` rejected |
-| `obsidianFile` | string | FlowFocus.md | `_/\\` → `_`, 100 chars |
 
 Example:
 ```json
@@ -66,7 +65,7 @@ qs ipc -n -p "$OMARCHY_PATH/shell" call flowfocus {start,pause,resume,toggle,res
 ```
 
 ## Security
-* `Model.sanitizePluginDir` blocks `..`; `sanitizeVaultPath` blocks `..`/`;`/`&`/`|`/`$`/`\``/`*`/`?`/`<>`/`^()`/`{}`/`[]`/`\`/`'`/`"`/control chars, 500 chars, vault file `_/\\`→`_` + `sanitizeProfileNameForPath` for per-profile subfolders. Task text `trim` 200, `\\`/`"`/`$`/`` ` `` escaped before `bash -c` `printf`. Task `column`/`profileId` whitelisted, `done`/`pushed` bool-coerced. All writes `FileView atomicWrites`. `ConfirmDialog` Yes/No for delete task/profile + vault sync.
+* `Model.sanitizePluginDir` blocks `..`; `sanitizeVaultPath` blocks `..`/`;`/`&`/`|`/`$`/`\``/`*`/`?`/`<>`/`^()`/`{}`/`[]`/`\`/`'`/`"`/control chars, 500 chars + `sanitizeProfileNameForPath` for `focusflow/<Space>.md` paths. Task text `trim` 200, `\\`/`"`/`$`/`` ` `` escaped before `bash -c` `printf`. Task `column`/`profileId` whitelisted, `done`/`pushed` bool-coerced. All writes `FileView atomicWrites`. `ConfirmDialog` Yes/No for delete task/profile + vault sync.
 
 ## Development
 ```bash
@@ -76,7 +75,11 @@ omarchy restart shell
 ```
 * `BarWidget.qml` — `FileView` + single `tickTimer 1000ms` + `alarmMuteTimer 30000ms`, `Model.tick` deadline, `JSON.parse(JSON.stringify(state))` to trigger QML, `cycleProfile`/`moveTaskUp/Down`.
 * `Panel.qml` — `KeyboardPanel` (no extra `BorderSurface`), `Flickable` per-column, `SmallToggle: Item 32px`, `Shortcut Alt+H/L`, hover `▲▼` prioritization, `ConfirmDialog` for deletes.
-* `Model.js` — pure: `defaultState v2` with `kanbanProfiles/activeKanbanProfileId`, `parse` migration, `phaseDurationSec/tick/progress`, task CRUD + `profileId` + `pushedToObsidian/pushedColumn`, `playTick/alarm` `tick.ogg/wav` fallback, `appendTaskToVault` per-profile `vault/<Profile>/FlowFocus.md` idempotent.
+* `Model.js` — pure: `defaultState v2` with `kanbanProfiles/activeKanbanProfileId`, `parse` migration, `phaseDurationSec/tick/progress`, task CRUD + `profileId` + `pushedToObsidian/pushedColumn`, `playTick/alarm` `tick.ogg/wav` fallback, `appendTaskToVault` per-space `focusflow/<Space>.md` idempotent + legacy auto-migration.
+
+## Changelog v1.5.0 (vault layout)
+* Vault: single `focusflow/` folder under your vault path, one file per space (`Default.md`, `<Space>.md`, …) — no more hunting across base file vs per-space subfolders. `obsidianFile` setting retired. Old files (`FlowFocus.md`, `<Space>/FlowFocus.md`) auto-move on first write; undo/delete also cleans legacy copies. Panel shows the resolved destination per active space.
+* UI: vault path field full-width, `?` help popup, hover action pill, bell/`M` master mute.
 
 ## Changelog v1.4.0 (polished)
 * Profiles: 20 spaces (`Default` + custom), `Kanban — <Space>` heading, pill tabs + `+` creator, `Alt+H/L` cycle when focused, per-profile tasks/vault files/counts, `Yes/No` confirm on delete.

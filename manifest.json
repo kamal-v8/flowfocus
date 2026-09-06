@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "flowfocus",
   "name": "FocusFlow",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "kamal",
   "description": "FocusFlow — Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
   "kinds": [
@@ -26,14 +26,14 @@
       "tickVolume": 0.3,
       "alarmEnabled": true,
       "alarmVolume": 0.5,
+      "soundMuted": false,
       "kanbanMode": false,
       "showPomodoros": true,
       "autoStartBreaks": false,
       "autoStartWork": false,
       "notificationsEnabled": true,
       "obsidianEnabled": false,
-      "obsidianVaultPath": "",
-      "obsidianFile": "FlowFocus.md"
+      "obsidianVaultPath": ""
     },
     "schema": [
       {
@@ -77,6 +77,11 @@
         "label": "Alarm volume (0.0-1.0)"
       },
       {
+        "key": "soundMuted",
+        "type": "bool",
+        "label": "Mute all sounds (bell / M key)"
+      },
+      {
         "key": "kanbanMode",
         "type": "bool",
         "label": "Use kanban board instead of plain list"
@@ -104,17 +109,12 @@
       {
         "key": "obsidianEnabled",
         "type": "bool",
-        "label": "Push done tasks to Obsidian (manual approve)"
+        "label": "Push tasks to notes app (manual approve)"
       },
       {
         "key": "obsidianVaultPath",
         "type": "string",
-        "label": "Obsidian vault path (e.g. ~/Documents/ObsidianVault)"
-      },
-      {
-        "key": "obsidianFile",
-        "type": "string",
-        "label": "Obsidian file name (inside vault)"
+        "label": "Notes folder path (Obsidian, Logseq, or any markdown app)"
       }
     ]
   }

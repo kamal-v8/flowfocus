@@ -43,7 +43,7 @@ Panel {
     }
     return null
   }
-  readonly property var nextUp: Model.nextTask(state)
+  readonly property var nextUp: Model.nextTask(state, state.activeKanbanProfileId)
   readonly property bool kanbanMode: ffSettings.kanbanMode === true
   readonly property string activeProfileId: state.activeKanbanProfileId || "default"
   readonly property var profiles: state.kanbanProfiles || []
@@ -54,32 +54,12 @@ Panel {
   property string newProfileName: ""
   property bool settingsVisible: false
   property bool showProfileCreator: false
-
-  // Alt+H / Alt+L to cycle kanban profiles when FocusFlow is focused
-  Shortcut {
-    sequence: "Alt+H"
-    enabled: panel.open && root.kanbanMode
-    onActivated: root.ff.cycleProfile(-1)
-  }
-  Shortcut {
-    sequence: "Alt+L"
-    enabled: panel.open && root.kanbanMode
-    onActivated: root.ff.cycleProfile(1)
-  }
-  Shortcut {
-    sequence: "Alt+h"
-    enabled: panel.open && root.kanbanMode
-    onActivated: root.ff.cycleProfile(-1)
-  }
-  Shortcut {
-    sequence: "Alt+l"
-    enabled: panel.open && root.kanbanMode
-    onActivated: root.ff.cycleProfile(1)
-  }
+  property bool isRenaming: false
+  property bool showHelp: false
 
   // ---- Layout ----
   readonly property int basePanelWidth: Style.space(340)
-  readonly property int kanbanPanelWidth: Style.space(580)
+  readonly property int kanbanPanelWidth: Style.space(520)
   readonly property int panelWidth: root.kanbanMode ? kanbanPanelWidth : basePanelWidth
 
   // Ultra-compact toggle — dense row (32px) without BorderSurface card chrome
@@ -143,9 +123,70 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
-      onActivateRequested: root.ff.toggleTimer()
+      // Block shell key handling while typing so Space/h/l don't trigger timer/nav.
+      // Dialogs are handled via signals below (not blocked) so Esc/Enter/Tab route to them.
+      blocked: taskInput.activeFocus || profileInput.activeFocus
+      onCloseRequested: {
+        if (confirmDeleteDone.opened) confirmDeleteDone.closeDialog()
+        else if (confirmDeleteTask.opened) confirmDeleteTask.canceled()
+        else if (confirmDeleteProfile.opened) confirmDeleteProfile.canceled()
+        else if (root.showHelp) root.showHelp = false
+        else root.close()
+      }
+      onTabRequested: function(direction) {
+        if (confirmDeleteDone.opened) confirmDeleteDone.cycleSelection(direction)
+        else if (confirmDeleteTask.opened) confirmDeleteTask.selectedIndex = confirmDeleteTask.selectedIndex === 0 ? 1 : 0
+        else if (confirmDeleteProfile.opened) confirmDeleteProfile.selectedIndex = confirmDeleteProfile.selectedIndex === 0 ? 1 : 0
+        else if (root.showHelp) return
+        else root.switchPanel(direction)
+      }
+      onMoveRequested: function(dx, dy) {
+        // Arrow/h/l navigation doubles as dialog Left/Right toggle when a confirm is open.
+        if (dx !== 0 && confirmDeleteDone.opened) { confirmDeleteDone.cycleSelection(dx); return }
+        if (dx !== 0 && confirmDeleteTask.opened) { confirmDeleteTask.selectedIndex = confirmDeleteTask.selectedIndex === 0 ? 1 : 0; return }
+        if (dx !== 0 && confirmDeleteProfile.opened) { confirmDeleteProfile.selectedIndex = confirmDeleteProfile.selectedIndex === 0 ? 1 : 0; return }
+      }
+      onReturnRequested: {
+        if (confirmDeleteDone.opened) confirmDeleteDone.activateSelected()
+        else if (confirmDeleteTask.opened) { if (confirmDeleteTask.selectedIndex === 0) confirmDeleteTask.canceled(); else confirmDeleteTask.confirmed() }
+        else if (confirmDeleteProfile.opened) { if (confirmDeleteProfile.selectedIndex === 0) confirmDeleteProfile.canceled(); else confirmDeleteProfile.confirmed() }
+        else if (root.showHelp) root.showHelp = false
+      }
+      onActivateRequested: {
+        if (confirmDeleteDone.opened) confirmDeleteDone.activateSelected()
+        else if (confirmDeleteTask.opened) { if (confirmDeleteTask.selectedIndex === 0) confirmDeleteTask.canceled(); else confirmDeleteTask.confirmed() }
+        else if (confirmDeleteProfile.opened) { if (confirmDeleteProfile.selectedIndex === 0) confirmDeleteProfile.canceled(); else confirmDeleteProfile.confirmed() }
+        else if (root.showHelp) root.showHelp = false
+        else if (root.ff) root.ff.toggleTimer()
+      }
+      onDeleteRequested: {
+        // 'x' key — ignore while a confirm dialog is open (user must click).
+      }
+      onTextKey: function(t) {
+        if (confirmDeleteDone.opened || confirmDeleteTask.opened || confirmDeleteProfile.opened || root.showHelp) return
+        if ((t === "m" || t === "M") && root.ff) root.ff.toggleMute()
+      }
+    }
+
+    // Alt+H / Alt+L to cycle kanban profiles — wrapped in a zero-size Item
+    // because KeyboardPanel's contentItem list only takes QQuickItem
+    // (same pattern as hyprmoncfg). ApplicationShortcut context beats
+    // PanelKeyCatcher's h/l swallow (it doesn't check Alt modifier).
+    Item {
+      width: 0
+      height: 0
+      Shortcut {
+        sequence: "Alt+H"
+        context: Qt.ApplicationShortcut
+        enabled: root.opened && !confirmDeleteDone.opened && !confirmDeleteTask.opened && !confirmDeleteProfile.opened && !root.showHelp && !keyCatcher.blocked
+        onActivated: if (root.ff) root.ff.cycleProfile(-1)
+      }
+      Shortcut {
+        sequence: "Alt+L"
+        context: Qt.ApplicationShortcut
+        enabled: root.opened && !confirmDeleteDone.opened && !confirmDeleteTask.opened && !confirmDeleteProfile.opened && !root.showHelp && !keyCatcher.blocked
+        onActivated: if (root.ff) root.ff.cycleProfile(1)
+      }
     }
 
     // Content goes directly here — KeyboardPanel's contentHolder is the
@@ -218,9 +259,15 @@ Panel {
         }
 
         Column {
+          id: timerInfoCol
           anchors.verticalCenter: parent.verticalCenter
           spacing: 1
-          width: root.panelWidth >= 500 ? 140 : 92
+          // Flexible in wide (kanban) mode so the header fills the row and the
+          // control box sits right beside the timer instead of leaving a dead
+          // strip; fixed narrow width kept for the 340px list layout.
+          width: root.panelWidth >= 500
+            ? Math.max(140, parent.width - timerRingSlot.width - controlBox.width - bellBtn.width - gearBtn.width - Style.spacing.controlPaddingX * 5)
+            : 92
 
           Text {
             text: Model.phaseLabel(root.phase)
@@ -301,10 +348,22 @@ Panel {
           }
         }
 
-        // Spacer keeps gear at far right while box stays beside timer
+        // Spacer keeps bell + gear at far right; absorbs only rounding slack
+        // since timerInfoCol already fills the row.
         Item {
-          width: Math.max(0, parent.width - timerRingSlot.width - (root.panelWidth >= 500 ? 140 : 92) - controlBox.width - gearBtn.width - Style.spacing.controlPaddingX * 4)
+          id: headerSpacer
+          width: Math.max(0, parent.width - timerRingSlot.width - timerInfoCol.width - controlBox.width - bellBtn.width - gearBtn.width - Style.spacing.controlPaddingX * 5)
           height: 1
+        }
+
+        // Master mute bell — immediately silences tick + alarm (M key does the same)
+        Button {
+          id: bellBtn
+          text: root.ffSettings.soundMuted ? "\uf1f6" : "\uf0f3"
+          foreground: root.ffSettings.soundMuted ? Color.urgent : Color.muted
+          tooltipText: root.ffSettings.soundMuted ? "Unmute all sound (M)" : "Mute all sound (M)"
+          onClicked: if (root.ff) root.ff.toggleMute()
+          anchors.verticalCenter: parent.verticalCenter
         }
 
         // Settings gear icon
@@ -346,6 +405,13 @@ Panel {
             description: "Dun on phase end"
             checked: root.ffSettings.alarmEnabled !== false
             onClicked: { root.ff.state.settings.alarmEnabled = !(root.ffSettings.alarmEnabled !== false); root.ff.saveState(); root.ff.applyTickState() }
+          }
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Mute all"
+            description: "Bell / M key · kills sound"
+            checked: root.ffSettings.soundMuted === true
+            onClicked: if (root.ff) root.ff.toggleMute()
           }
         }
         Row {
@@ -432,13 +498,13 @@ Panel {
           }
         }
 
-        // Vault — optional Obsidian export (manual approve)
+        // Notes export — Obsidian or any markdown notes app (manual approve)
         PanelSeparator {}
-        Text { text: "Vault"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        Text { text: "Notes"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
         SmallToggle {
           width: parent.width
-          label: "Obsidian export"
-          description: root.ffSettings.obsidianEnabled ? (root.ffSettings.obsidianVaultPath || "no path set") : "Push done tasks on approve"
+          label: "Notes export"
+          description: root.ffSettings.obsidianEnabled ? (root.ffSettings.obsidianVaultPath || "no path set") : "Obsidian / any notes app, on approve"
           checked: root.ffSettings.obsidianEnabled === true
           onClicked: { root.ff.state.settings.obsidianEnabled = !root.ffSettings.obsidianEnabled; root.ff.saveState(); root.ff.applyTickState() }
         }
@@ -446,24 +512,12 @@ Panel {
           width: parent.width
           spacing: Style.space(2)
           visible: root.ffSettings.obsidianEnabled === true
-          Row {
+          TextField {
             width: parent.width
-            spacing: Style.spacing.controlPaddingX
-            TextField {
-              width: parent.width - fileField.width - Style.spacing.controlPaddingX
-              placeholderText: "Vault path e.g. ~/ObsidianVault"
-              text: root.ffSettings.obsidianVaultPath || ""
-              onAccepted: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
-              onEditingFinished: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
-            }
-            TextField {
-              id: fileField
-              width: 110
-              placeholderText: "FlowFocus.md"
-              text: root.ffSettings.obsidianFile || "FlowFocus.md"
-              onAccepted: { root.ff.state.settings.obsidianFile = text.trim().slice(0,100) || "FlowFocus.md"; root.ff.saveState(); root.ff.applyTickState() }
-              onEditingFinished: { root.ff.state.settings.obsidianFile = text.trim().slice(0,100) || "FlowFocus.md"; root.ff.saveState(); root.ff.applyTickState() }
-            }
+              placeholderText: "Notes folder e.g. ~/Documents/notes — saves to <folder>/focusflow/<Space>.md"
+            text: root.ffSettings.obsidianVaultPath || ""
+            onAccepted: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
+            onEditingFinished: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
           }
           Row {
             width: parent.width
@@ -479,9 +533,10 @@ Panel {
                 var all = Model.tasksForProfile(root.state, root.activeProfileId)
                 var pending = all.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length
                 var total = all.length
+                var space = root.activeProfile ? root.activeProfile.name : "Default"
                 if (!root.ffSettings.obsidianVaultPath) return "set vault path"
-                if (pending === 0 && total > 0) return "all pushed ✓ · " + (root.ffSettings.obsidianFile || "FlowFocus.md")
-                return pending + "/" + total + " pending · " + (root.ffSettings.obsidianFile || "FlowFocus.md")
+                if (pending === 0 && total > 0) return "all pushed ✓ · " + space
+                return pending + "/" + total + " pending · " + space
               }
               color: Color.muted
               font.family: Style.font.family
@@ -491,25 +546,54 @@ Panel {
               width: parent.width - 110 - parent.spacing
             }
           }
+          // Resolved destination for the active space — Default writes the base
+          // file, other spaces write vault/<Space>/file (this is where pushes go).
+          Text {
+            visible: !!root.ffSettings.obsidianVaultPath
+            text: "→ " + root.vaultDestForActive()
+            color: Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption - 1
+            opacity: 0.85
+            elide: Text.ElideMiddle
+            width: parent.width
+          }
         }
 
         PanelSeparator {}
       }
 
       // ---- Tasks section ----
-      PanelSectionHeader {
-        text: root.kanbanMode ? ("Kanban — " + (root.activeProfile ? root.activeProfile.name : "Default")) : "Tasks"
+      Row {
+        width: parent.width
+        spacing: Style.space(6)
+        PanelSectionHeader {
+          width: parent.width - helpBtn.width - parent.spacing
+          text: (root.kanbanMode ? "Kanban" : "Tasks") + " — " + (root.activeProfile ? root.activeProfile.name : "Default")
+          elide: Text.ElideRight
+        }
+        Button {
+          id: helpBtn
+          text: "?"
+          foreground: Color.urgent
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(3)
+          verticalPadding: Style.space(1)
+          tooltipText: "Bindings & tips"
+          onClicked: root.showHelp = !root.showHelp
+          anchors.verticalCenter: parent.verticalCenter
+        }
       }
 
-      // Kanban profiles — switchboard for project spaces, heading differentiated
+      // Spaces switchboard — visible in List AND Board (profiles scope both).
+      // Alt+H / Alt+L and ◀ ▶ cycle from either mode.
       Column {
-        visible: root.kanbanMode
         width: parent.width
         spacing: Style.space(3)
 
         Row {
           width: parent.width
-          spacing: Style.spacing.controlPaddingX
+          spacing: Style.space(4)
 
           Text {
             text: "Spaces:"
@@ -520,8 +604,33 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
           }
 
+          // ◀ ▶ cycle buttons — mouse/touch alternative to Alt+H/L
+          Button {
+            id: prevProfileBtn
+            text: "◀"
+            foreground: Color.muted
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(3)
+            verticalPadding: Style.space(2)
+            tooltipText: "Previous space (Alt+H)"
+            onClicked: if (root.ff) root.ff.cycleProfile(-1)
+          }
+          Button {
+            id: nextProfileBtn
+            text: "▶"
+            foreground: Color.muted
+            fontSize: Style.font.caption
+            horizontalPadding: Style.space(3)
+            verticalPadding: Style.space(2)
+            tooltipText: "Next space (Alt+L)"
+            onClicked: if (root.ff) root.ff.cycleProfile(1)
+          }
+
           Flickable {
-            width: parent.width - 52 - addProfileBtn.width - Style.spacing.controlPaddingX*2
+            // Hug the pills instead of filling the row, so "+" parks right
+            // after the last space instead of stranding ~360px of dead
+            // scroller interior. Still caps at available width + scrolls.
+            width: Math.min(parent.width - 52 - prevProfileBtn.width - nextProfileBtn.width - addProfileBtn.width - Style.space(4)*4 - Style.spacing.controlPaddingX, Math.max(profileRow.implicitWidth, 1))
             height: 28
             contentWidth: profileRow.implicitWidth
             contentHeight: 28
@@ -544,6 +653,7 @@ Panel {
                   fontSize: Style.font.caption
                   horizontalPadding: Style.space(4)
                   verticalPadding: Style.space(2)
+                  tooltipText: profile.id === root.activeProfileId ? ("Active space — " + profile.name) : ("Switch to " + profile.name)
                   onClicked: root.ff.setActiveProfile(profile.id)
                 }
               }
@@ -557,7 +667,8 @@ Panel {
             fontSize: Style.font.caption
             horizontalPadding: Style.space(4)
             verticalPadding: Style.space(2)
-            onClicked: root.showProfileCreator = !root.showProfileCreator
+            tooltipText: "New space"
+            onClicked: { root.isRenaming = false; root.showProfileCreator = !root.showProfileCreator; if (root.showProfileCreator) Qt.callLater(function() { profileInput.forceActiveFocus() }) }
           }
         }
 
@@ -573,32 +684,21 @@ Panel {
             TextField {
               id: profileInput
               width: parent.width - createBtn.width - cancelBtn.width - Style.spacing.controlPaddingX*2
-              placeholderText: "New space name…"
+              placeholderText: root.isRenaming ? "Rename space…" : "New space name…"
               text: root.newProfileName
               maximumLength: 30
               onTextChanged: root.newProfileName = text.slice(0,30)
-              onAccepted: {
-                if (root.newProfileName.trim()) {
-                  root.ff.createProfile(root.newProfileName.trim())
-                  root.newProfileName = ""
-                  profileInput.text = ""
-                  root.showProfileCreator = false
-                }
-              }
+              onAccepted: root.confirmProfileName()
+              Keys.onEscapePressed: function(event) { profileInput.focus = false; keyCatcher.forceActiveFocus(); event.accepted = true }
             }
 
             Button {
               id: createBtn
-              text: "Create"
+              text: root.isRenaming ? "Save" : "Create"
               foreground: Color.accent
               fontSize: Style.font.caption
               enabled: root.newProfileName.trim().length > 0
-              onClicked: {
-                root.ff.createProfile(root.newProfileName.trim())
-                root.newProfileName = ""
-                profileInput.text = ""
-                root.showProfileCreator = false
-              }
+              onClicked: root.confirmProfileName()
             }
 
             Button {
@@ -606,67 +706,52 @@ Panel {
               text: "✕"
               foreground: Color.muted
               fontSize: Style.font.caption
-              onClicked: { root.showProfileCreator = false; root.newProfileName = ""; profileInput.text = "" }
-            }
-          }
-
-          Row {
-            width: parent.width
-            spacing: Style.spacing.controlPaddingX
-            visible: root.activeProfile && root.activeProfile.id !== "default"
-
-            Text {
-              text: "Space: " + (root.activeProfile ? root.activeProfile.name : "")
-              color: Color.muted
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              anchors.verticalCenter: parent.verticalCenter
-              elide: Text.ElideRight
-              width: parent.width - renameBtn.width - deleteProfileBtn.width - parent.spacing*2
-            }
-
-            Button {
-              id: renameBtn
-              text: "Rename"
-              foreground: Color.accent
-              fontSize: Style.font.caption
-              enabled: root.newProfileName.trim().length > 0
-              onClicked: {
-                root.ff.renameProfile(root.activeProfileId, root.newProfileName.trim() || root.activeProfile.name)
-                root.newProfileName = ""
-                profileInput.text = ""
-              }
-            }
-
-            Button {
-              id: deleteProfileBtn
-              text: "Delete"
-              foreground: Color.urgent
-              fontSize: Style.font.caption
-              onClicked: confirmDeleteProfile.opened = true
+              onClicked: { root.showProfileCreator = false; root.isRenaming = false; root.newProfileName = ""; profileInput.text = "" }
             }
           }
         }
-      }
 
-      Text {
-        visible: !root.kanbanMode
-        text: "☐ done   ○ focus / ● active   → move column   ✕ delete   · Space to start/pause"
-        color: Color.muted
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-        width: parent.width
-      }
+        // Active space management — ALWAYS visible so Remove is discoverable
+        // (previously hidden inside the creator, which is why removal felt missing).
+        Row {
+          width: parent.width
+          spacing: Style.spacing.controlPaddingX
+          visible: root.activeProfile && root.activeProfile.id !== "default"
 
-      Text {
-        visible: root.kanbanMode
-        text: "Click card to focus (●) · Use ← → to move between Backlog → To Do → Doing → Done"
-        color: Color.muted
-        font.family: Style.font.family
-        font.pixelSize: Style.font.caption
-        wrapMode: Text.Wrap
-        width: parent.width
+          Text {
+            text: "Active: " + (root.activeProfile ? root.activeProfile.name : "") + " (" + Model.tasksForProfile(root.state, root.activeProfileId).length + ")"
+            color: Color.muted
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+            elide: Text.ElideRight
+            width: parent.width - renameBtn.width - deleteProfileBtn.width - parent.spacing*2
+          }
+
+          Button {
+            id: renameBtn
+            text: "Rename"
+            foreground: Color.accent
+            fontSize: Style.font.caption
+            tooltipText: "Rename this space"
+            onClicked: {
+              root.newProfileName = root.activeProfile ? root.activeProfile.name : ""
+              profileInput.text = root.newProfileName
+              root.isRenaming = true
+              root.showProfileCreator = true
+              Qt.callLater(function() { profileInput.forceActiveFocus(); profileInput.selectAll() })
+            }
+          }
+
+          Button {
+            id: deleteProfileBtn
+            text: "Remove"
+            foreground: Color.urgent
+            fontSize: Style.font.caption
+            tooltipText: "Remove this space (asks Yes/No)"
+            onClicked: { confirmDeleteProfile.opened = true; keyCatcher.forceActiveFocus() }
+          }
+        }
       }
 
       // New task input — scoped to active profile heading
@@ -677,11 +762,12 @@ Panel {
         TextField {
           id: taskInput
           width: parent.width - addButton.implicitWidth - Style.spacing.controlPaddingX
-          placeholderText: root.kanbanMode && root.activeProfile ? ("Add to " + root.activeProfile.name + "…") : "Add a task..."
+          placeholderText: root.activeProfile ? ("Add to " + root.activeProfile.name + "…") : "Add a task..."
           text: root.newTaskText
           maximumLength: 200
           onTextChanged: root.newTaskText = text.slice(0, 200)
           onAccepted: root.addTaskFromInput()
+          Keys.onEscapePressed: function(event) { taskInput.focus = false; keyCatcher.forceActiveFocus(); event.accepted = true }
         }
 
         Button {
@@ -709,14 +795,15 @@ Panel {
           clip: true
           boundsBehavior: Flickable.StopAtBounds
           model: Model.tasksForProfile(root.state, root.activeProfileId)
-          spacing: 4
+          spacing: 8
 
           delegate: Rectangle {
             id: plainDelegate
             width: plainList.width
-            height: taskRow.implicitHeight + Style.space(4)
+            height: taskRow.implicitHeight + Style.space(8)
             radius: Style.cornerRadius / 2
-            color: task.done ? Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.08) : "transparent"
+            color: plainDelegate.isHovered ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.07)
+                  : task.done ? Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.08) : "transparent"
             border.color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.15)
             border.width: 0
 
@@ -770,7 +857,9 @@ Panel {
                 font.strikeout: task.done
                 elide: Text.ElideRight
                 wrapMode: Text.NoWrap
-                width: parent.width - checkBox.width - focusBtn.width - moveBtn.width - vaultBtn.width - upBtn.width - downBtn.width - parent.spacing * 5
+                // Constant width — hover actions float above in a pill, so the
+                // row never jumps/resizes on hover.
+                width: parent.width - checkBox.width - focusBtn.width - parent.spacing * 2
                 anchors.verticalCenter: parent.verticalCenter
               }
 
@@ -781,92 +870,89 @@ Panel {
                 onClicked: root.ff.setActiveTask(task.id)
                 anchors.verticalCenter: parent.verticalCenter
               }
-
-              Button {
-                id: moveBtn
-                text: "→"
-                foreground: Color.muted
-                onClicked: root.cycleTaskColumn(task)
-                anchors.verticalCenter: parent.verticalCenter
-              }
-
-              // Hover-only up/down to prioritize (1st) — visible only when hovered
-              Text {
-                id: upBtn
-                visible: plainDelegate.isHovered
-                text: "▲"
-                color: Color.muted
-                font.pixelSize: Style.font.caption
-                width: visible ? 14 : 0
-                horizontalAlignment: Text.AlignHCenter
-                anchors.verticalCenter: parent.verticalCenter
-                MouseArea {
-                  anchors.fill: parent
-                  anchors.margins: -4
-                  cursorShape: Qt.PointingHandCursor
-                  enabled: parent.visible
-                  onClicked: root.ff.moveTaskUp(task.id)
-                }
-              }
-              Text {
-                id: downBtn
-                visible: plainDelegate.isHovered
-                text: "▼"
-                color: Color.muted
-                font.pixelSize: Style.font.caption
-                width: visible ? 14 : 0
-                horizontalAlignment: Text.AlignHCenter
-                anchors.verticalCenter: parent.verticalCenter
-                MouseArea {
-                  anchors.fill: parent
-                  anchors.margins: -4
-                  cursorShape: Qt.PointingHandCursor
-                  enabled: parent.visible
-                  onClicked: root.ff.moveTaskDown(task.id)
-                }
-              }
-
-              // Vault push — any column, manual approve; ✓ becomes ↩ to undo (removes from vault + clears flag)
-              Text {
-                id: vaultBtn
-                visible: root.ffSettings.obsidianEnabled === true
-                text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "↩" : "⬆"
-                color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.urgent : Color.accent
-                font.pixelSize: Style.font.body
-                font.bold: true
-                width: visible ? 18 : 0
-                horizontalAlignment: Text.AlignHCenter
-                anchors.verticalCenter: parent.verticalCenter
-                MouseArea {
-                  anchors.fill: parent
-                  anchors.margins: -4
-                  cursorShape: Qt.PointingHandCursor
-                  enabled: parent.visible
-                  onClicked: {
-                    if (task.pushedToObsidian && task.pushedColumn === task.column) root.ff.undoPushToObsidian(task.id)
-                    else root.ff.pushTaskToObsidian(task.id)
+            }
+            // Hover action pill — → move column, ▲ ▼ prioritize, ⬆/↩ vault, - delete.
+            // Parked left of the focus dot so ○ is never covered; resting row stays airy.
+            Rectangle {
+              id: hoverPill
+              visible: plainDelegate.isHovered
+              // Positioned via x/y (not anchors): parks left of the focus dot
+              // so ○ is never covered. No anchor to nested items involved.
+              x: parent.width - width - focusBtn.width - Style.space(8)
+              y: Math.round((parent.height - height) / 2)
+              width: hoverRow.implicitWidth + Style.space(14)
+              height: hoverRow.implicitHeight + Style.space(7)
+              radius: Style.cornerRadius / 2
+              color: Color.popups.background
+              border.color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.25)
+              border.width: 1
+              Row {
+                id: hoverRow
+                anchors.centerIn: parent
+                spacing: Style.space(6)
+                Text {
+                  text: "→"
+                  color: Color.muted
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.cycleTaskColumn(task)
                   }
                 }
-              }
-            }
-            // – at right-hand top corner to remove task — asks Yes/No before removing
-            Text {
-              text: "-"
-              color: Color.urgent
-              font.pixelSize: 12
-              font.bold: true
-              z: 10
-              anchors.right: parent.right
-              anchors.top: parent.top
-              anchors.rightMargin: 6
-              anchors.topMargin: 2
-              MouseArea {
-                anchors.fill: parent
-                anchors.margins: -6
-                z: 10
-                cursorShape: Qt.PointingHandCursor
-                preventStealing: true
-                onClicked: { confirmDeleteTask.taskId = task.id; confirmDeleteTask.taskText = task.text; confirmDeleteTask.opened = true }
+                Text {
+                  text: "▲"
+                  color: Color.muted
+                  font.pixelSize: Style.font.caption
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.ff.moveTaskUp(task.id)
+                  }
+                }
+                Text {
+                  text: "▼"
+                  color: Color.muted
+                  font.pixelSize: Style.font.caption
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.ff.moveTaskDown(task.id)
+                  }
+                }
+                Text {
+                  visible: root.ffSettings.obsidianEnabled === true
+                  text: (task.pushedToObsidian && task.pushedColumn === task.column) ? "↩" : "⬆"
+                  color: (task.pushedToObsidian && task.pushedColumn === task.column) ? Color.urgent : Color.accent
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: parent.visible
+                    onClicked: {
+                      if (task.pushedToObsidian && task.pushedColumn === task.column) root.ff.undoPushToObsidian(task.id)
+                      else root.ff.pushTaskToObsidian(task.id)
+                    }
+                  }
+                }
+                Text {
+                  text: "-"
+                  color: Color.urgent
+                  font.pixelSize: Style.font.bodySmall
+                  font.bold: true
+                  MouseArea {
+                    anchors.fill: parent
+                    anchors.margins: -4
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.requestDeleteTask(task)
+                  }
+                }
               }
             }
           }
@@ -878,6 +964,7 @@ Panel {
           id: kanbanContainer
           visible: root.kanbanMode
           width: parent.width
+          onWidthChanged: console.warn("[ff-dbg] W viewport=" + width + " rowImplicit=" + kanbanRow.implicitWidth + " kb=" + root.kanbanMode + " ffNull=" + (root.ff === null))
           height: Math.min(contentHeight, Style.space(root.settingsVisible ? 200 : 300))
           contentWidth: kanbanRow.implicitWidth
           contentHeight: kanbanRow.implicitHeight
@@ -888,6 +975,7 @@ Panel {
           Row {
             id: kanbanRow
             spacing: Style.space(12)
+            Component.onCompleted: console.warn("[ff-dbg] panelWidth=" + root.panelWidth + " viewport=" + kanbanContainer.width + " rowImplicit=" + implicitWidth + " col0=" + (children.length > 0 ? children[0].width : -1) + " cardW=" + panel.contentWidth)
 
             Repeater {
               model: Model.COLUMNS
@@ -896,7 +984,12 @@ Panel {
                 required property string modelData
                 property string colId: modelData
 
-                width: 132
+                // Adaptive: the 4 columns always share the viewport exactly,
+                // so no dead strip on the right at any theme scale. Falls back
+                // to 120px + horizontal scroll on very narrow viewports.
+                // (No binding loop: viewport width comes from layout, and
+                // contentWidth only follows implicitWidth one way.)
+                width: Math.max(120, Math.floor((kanbanContainer.width - Style.space(12) * 3) / 4))
                 spacing: Style.space(8)
 
                 // Header with pill count — more breathing room
@@ -918,7 +1011,7 @@ Panel {
                     Text {
                       id: countText
                       anchors.centerIn: parent
-                      text: String(Model.tasksByColumn(root.state, colId).length)
+                      text: String(Model.tasksByColumn(root.state, colId, root.activeProfileId).length)
                       color: Color.muted
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption - 1
@@ -1131,7 +1224,7 @@ Panel {
                         z: 10
                         cursorShape: Qt.PointingHandCursor
                         preventStealing: true
-                        onClicked: { confirmDeleteTask.taskId = task.id; confirmDeleteTask.taskText = task.text; confirmDeleteTask.opened = true }
+                        onClicked: root.requestDeleteTask(task)
                       }
                     }
 
@@ -1158,27 +1251,235 @@ Panel {
         }
       }
     }
-  }
-  }
 
-  ConfirmDialog {
-    id: confirmDeleteTask
-    property string taskId: ""
-    property string taskText: ""
-    message: "Delete task \"" + taskText + "\"? Also removes from Obsidian if pushed. This cannot be undone."
-    confirmText: "Delete"
-    cancelText: "Cancel"
-    onConfirmed: { if (taskId) root.ff.deleteTask(taskId); opened = false; taskId = ""; taskText = "" }
-    onCanceled: { opened = false; taskId = ""; taskText = "" }
-  }
+    }
 
-  ConfirmDialog {
-    id: confirmDeleteProfile
-    message: "Delete space \"" + (root.activeProfile ? root.activeProfile.name : "") + "\" and " + Model.tasksForProfile(root.state, root.activeProfileId).length + " tasks? Vault file kept. This cannot be undone."
-    confirmText: "Delete"
-    cancelText: "Cancel"
-    onConfirmed: { root.ff.deleteProfile(root.activeProfileId); opened = false }
-    onCanceled: opened = false
+    // Confirm dialogs — MUST be direct children of KeyboardPanel (same
+    // PanelWindow focus scope) so they actually render above content.
+    // Previously at root Panel level they were invisible, making "-" do nothing.
+    ConfirmDialog {
+      id: confirmDeleteTask
+      anchors.fill: parent
+      z: 100
+      property string taskId: ""
+      property string taskText: ""
+      message: "Delete task \"" + taskText + "\"? Also removes from notes if pushed. This cannot be undone."
+      confirmText: "Delete"
+      cancelText: "Cancel"
+      onConfirmed: { if (taskId && root.ff) root.ff.deleteTask(taskId); opened = false; taskId = ""; taskText = "" }
+      onCanceled: { opened = false; taskId = ""; taskText = "" }
+    }
+
+    // Done-task delete choice — deleting from Done means finished. Offer:
+    // Archive (save "- [x]" in notes + remove from board) vs Delete
+    // everywhere (also remove the notes line). ConfirmDialog only supports
+    // 2 buttons, so this is a custom 3-button overlay in the same style.
+    Item {
+      id: confirmDeleteDone
+      anchors.fill: parent
+      z: 110
+      visible: opened
+      property bool opened: false
+      property string taskId: ""
+      property string taskText: ""
+      // 0 = Cancel, 1 = Archive [x], 2 = Delete everywhere
+      property int selectedIndex: 1
+
+      function openFor(task) {
+        taskId = task.id
+        taskText = task.text
+        selectedIndex = 1 // default to Archive — the safe, non-destructive choice
+        opened = true
+      }
+      function closeDialog() { opened = false; taskId = ""; taskText = ""; selectedIndex = 1 }
+      function cycleSelection(dir) {
+        var d = (dir === undefined || dir === 0) ? 1 : (dir > 0 ? 1 : -1)
+        selectedIndex = (selectedIndex + d + 3) % 3
+      }
+      function activateSelected() {
+        if (!opened) return
+        if (selectedIndex === 0) closeDialog()
+        else if (selectedIndex === 1) { if (taskId && root.ff) root.ff.archiveDoneTask(taskId); closeDialog() }
+        else { if (taskId && root.ff) root.ff.deleteTask(taskId); closeDialog() }
+      }
+
+      Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.7)
+        MouseArea { anchors.fill: parent; onClicked: confirmDeleteDone.closeDialog() }
+
+        BorderSurface {
+          id: doneCard
+          width: Math.min(parent.width - Style.space(32), Style.space(370))
+          height: contentTopInset + contentBottomInset + doneMsg.implicitHeight + Style.space(16) + Style.space(34)
+          anchors.centerIn: parent
+          color: Color.background
+          borderSpec: Border.flat(Color.accent, Style.normalBorderWidth)
+          padding: Style.space(18)
+          radius: Style.cornerRadius
+          MouseArea { anchors.fill: parent; onClicked: {} }
+
+          Item {
+            anchors.fill: parent
+            anchors.topMargin: doneCard.contentTopInset
+            anchors.rightMargin: doneCard.contentRightInset
+            anchors.bottomMargin: doneCard.contentBottomInset
+            anchors.leftMargin: doneCard.contentLeftInset
+
+            Text {
+              id: doneMsg
+              anchors.left: parent.left
+              anchors.right: parent.right
+              anchors.top: parent.top
+              text: "Done — \"" + confirmDeleteDone.taskText + "\" is finished. Archive as - [x] in notes and remove from board, or delete everywhere (also removes from notes)?"
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.title
+              wrapMode: Text.WordWrap
+            }
+
+            Row {
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              spacing: Style.space(8)
+
+              Repeater {
+                model: ["Cancel", "Archive [x]", "Delete all"]
+                delegate: BorderSurface {
+                  required property int index
+                  required property string modelData
+                  readonly property bool selected: confirmDeleteDone.selectedIndex === index
+                  readonly property bool destructive: index === 2
+                  width: index === 1 ? Style.space(96) : Style.space(80)
+                  height: Style.space(34)
+                  color: selected
+                    ? (destructive ? Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.22) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08))
+                    : "transparent"
+                  borderSpec: Border.flat(destructive
+                    ? (selected ? Color.urgent : Qt.rgba(Color.urgent.r, Color.urgent.g, Color.urgent.b, 0.56))
+                    : (selected ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.38)), Style.normalBorderWidth)
+                  radius: 0
+                  Text {
+                    anchors.centerIn: parent
+                    text: modelData
+                    color: destructive ? (selected ? Color.urgent : Color.foreground) : (selected ? Color.accent : Color.foreground)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                  MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: confirmDeleteDone.selectedIndex = index
+                    onClicked: { confirmDeleteDone.selectedIndex = index; confirmDeleteDone.activateSelected() }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    ConfirmDialog {
+      id: confirmDeleteProfile
+      anchors.fill: parent
+      z: 100
+      message: "Remove space \"" + (root.activeProfile ? root.activeProfile.name : "") + "\" and " + Model.tasksForProfile(root.state, root.activeProfileId).length + " tasks? Vault file kept. This cannot be undone."
+      confirmText: "Remove"
+      cancelText: "Cancel"
+      onConfirmed: { if (root.ff) root.ff.deleteProfile(root.activeProfileId); opened = false }
+      onCanceled: opened = false
+    }
+
+    // Bindings & tips cheat-sheet — opened by the ? button in the section header.
+    // Overlay like the confirms (direct KeyboardPanel child), below them at z:90.
+    Item {
+      id: helpOverlay
+      anchors.fill: parent
+      z: 90
+      visible: root.showHelp
+
+      Rectangle {
+        anchors.fill: parent
+        color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.72)
+        MouseArea { anchors.fill: parent; onClicked: root.showHelp = false }
+      }
+
+      Rectangle {
+        id: helpCard
+        width: Math.min(parent.width - Style.space(32), Style.space(400))
+        height: helpCol.implicitHeight + Style.space(24)
+        anchors.centerIn: parent
+        radius: Style.cornerRadius
+        color: Color.popups.background
+        border.color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.3)
+        border.width: 1
+        MouseArea { anchors.fill: parent; onClicked: {} }
+
+        Column {
+          id: helpCol
+          anchors.fill: parent
+          anchors.margins: Style.space(10)
+          spacing: Style.space(4)
+
+          Text {
+            text: "Bindings & tips"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+
+          Repeater {
+            model: [
+              { key: "Space", desc: "start / pause timer" },
+              { key: "M", desc: "mute / unmute all sound (🔔)" },
+              { key: "Tab", desc: "switch Board ↔ List" },
+              { key: "Alt+H / Alt+L", desc: "previous / next space" },
+              { key: "○ / ●", desc: "focus a task (shows as Next)" },
+              { key: "☐", desc: "toggle done" },
+              { key: "← →", desc: "move card between columns" },
+              { key: "hover", desc: "▲ ▼ prioritize · ⬆ push to notes · − delete" },
+              { key: "− on Done", desc: "archive [x] in notes or delete everywhere" },
+              { key: "Esc", desc: "unfocus input · close popup · close panel" }
+            ]
+            delegate: Row {
+              required property var modelData
+              width: parent.width
+              spacing: Style.space(8)
+              Text {
+                text: modelData.key
+                color: Color.accent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                width: 92
+                elide: Text.ElideRight
+              }
+              Text {
+                text: modelData.desc
+                color: Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                wrapMode: Text.Wrap
+                width: parent.width - 100
+              }
+            }
+          }
+
+          Item { width: parent.width; height: Style.space(2) }
+
+          Button {
+            text: "Close"
+            foreground: Color.accent
+            fontSize: Style.font.caption
+            anchors.horizontalCenter: parent.horizontalCenter
+            onClicked: root.showHelp = false
+          }
+        }
+      }
+    }
   }
 
   // ---- Helpers ----
@@ -1190,11 +1491,55 @@ Panel {
     taskInput.text = ""
   }
 
+  // Shortened per-profile vault destination for the active space,
+  // e.g. ~/Documents/Obsidian-Vault/sync/focusflow/freelance.md
+  function vaultDestForActive() {
+    var name = root.activeProfile ? root.activeProfile.name : "Default"
+    var p = Model.obsidianFilePathForProfile(root.ffSettings, root.ffSettings.obsidianVaultPath, root.activeProfileId, name)
+    if (!p) return ""
+    var home = Quickshell.env("HOME") || ""
+    if (home && p.indexOf(home) === 0) p = "~" + p.slice(home.length)
+    return p
+  }
+
+  function confirmProfileName() {
+    var name = root.newProfileName.trim()
+    if (!name) return
+    if (root.isRenaming) root.ff.renameProfile(root.activeProfileId, name)
+    else root.ff.createProfile(name)
+    root.newProfileName = ""
+    profileInput.text = ""
+    root.showProfileCreator = false
+    root.isRenaming = false
+  }
+
   function cycleTaskColumn(task) {
     var cols = Model.COLUMNS
     var idx = cols.indexOf(task.column)
     var next = cols[(idx + 1) % cols.length]
     root.ff.moveTask(task.id, next)
+  }
+
+  function isNotesLinked() {
+    return root.ffSettings.obsidianEnabled === true && !!(root.ffSettings.obsidianVaultPath || "").trim()
+  }
+
+  // Deleting a Done task means finished: when notes are linked, ask whether
+  // to Archive ([x] in notes + remove from board) or Delete everywhere
+  // (also removes the notes line). Anything else uses the plain confirm.
+  function requestDeleteTask(task) {
+    if (!task) return
+    var isDone = task.done === true || task.column === "done"
+    if (isDone && isNotesLinked()) {
+      if (confirmDeleteTask.opened) { confirmDeleteTask.opened = false; confirmDeleteTask.taskId = ""; confirmDeleteTask.taskText = "" }
+      confirmDeleteDone.openFor(task)
+    } else {
+      if (confirmDeleteDone.opened) confirmDeleteDone.closeDialog()
+      confirmDeleteTask.taskId = task.id
+      confirmDeleteTask.taskText = task.text
+      confirmDeleteTask.opened = true
+    }
+    keyCatcher.forceActiveFocus()
   }
   function switchPanel(direction) {
     root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
