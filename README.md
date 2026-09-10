@@ -1,4 +1,4 @@
-# FocusFlow v1.5.0 — polished, lightweight
+# FocusFlow
 
 Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — single bar widget, rich popup, minimal resource footprint. Hover shows **FocusFlow**.
 
@@ -9,7 +9,7 @@ Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — s
 * **To-Do** — plain list or Kanban (adaptive columns fill the `520px` board, per-column vertical scroll). Plain: custom `18×18` checkbox. Hover pill holds `→ ▲ ▼ ⬆ −`. `Space` start/pause when panel focused.
 * **Notes export (Obsidian or any markdown app)** — optional manual export per kanban profile. Plain Markdown, no Obsidian-only syntax, so Obsidian, Logseq, or any text app can read it. Everything lives under `<folder>/focusflow/`, one file per space: `focusflow/Default.md`, `focusflow/<Space>.md`, … Task → `- [ ] task [To Do] — YYYY-MM-DD HH:MM <!-- id -->` (or `[x]` if `Done`). Idempotent `grep -v <!-- id -->`, `⬆`→`↩` undo removes line, `Push all` per active profile, delete-task also removes from notes. Old locations (`FlowFocus.md`, per-space subfolders) auto-migrate on first write.
 * **Kanban profiles** — `Default` + up to 20 custom spaces (`Kanban — <Space>` heading). `Spaces:` pill tabs + `+` creator, `Rename`/`Delete` (with `Yes/No` confirm). Switch via click or `Alt+H` / `Alt+L` when FocusFlow focused. Each profile isolated tasks, vault files, and counts.
-* **Bar** — idle `` only; running ring + `MM:SS` (`accent` work, `muted` break, `urgent` long break). `SUPER + SHIFT + T` toggles popup.
+* **Bar** — idle `` only; running ring + `MM:SS` (`accent` work, dimmed break, `urgent` long break). `SUPER + SHIFT + T` toggles popup.
 * **Compact UI** — `SmallToggle` `32px` 2-col grid, `PanelSlider 95px`, timing side-by-side, vault inline, per-column `Flickable` scroll, capped heights, no `ScrollBar` chrome, left accent `3px` + `●` for active task, `-` delete at top-right `z:10`.
 
 ## Install
@@ -27,7 +27,7 @@ omarchy-shell shell rescanPlugins; omarchy plugin enable flowfocus
 * Click → open/close, Right-click → start/pause, Middle → reset, `SUPER+SHIFT+T` → toggle, `Space` (focused) → start/pause
 * Header: ring + `MM:SS` + phase + `Next: task`. Gear `` collapses compact Settings.
 * Controls: Start/Pause/Reset/Skip, Board↔List, cycle `N — M pomodoros`.
-* Kanban: `← →` move, `✕` delete, `⬆` push (→ `✓`), `●` active. Plain: `☐` done, `○/●` focus, `→` cycle, `⬆`/`✕`.
+* Kanban: `← →` move, `−` delete, `⬆` push (→ `↩` undo), `●` active. Plain: `☐` done, `○/●` focus, hover pill holds `→ ▲ ▼ ⬆ −`.
 
 State: `~/.local/state/omarchy/focusflow.json` (`XDG_STATE_HOME` honoured, atomic `FileView`). `tasks[]` ≤200×200 chars, `column∈{backlog,todo,doing,done}`, `pushedToObsidian`+`pushedColumn` for idempotency.
 
@@ -48,12 +48,22 @@ State: `~/.local/state/omarchy/focusflow.json` (`XDG_STATE_HOME` honoured, atomi
 | `autoStartBreaks/Work` | bool | false |  |
 | `notificationsEnabled` | bool | true |  |
 | `obsidianEnabled` | bool | false |  |
-| `obsidianVaultPath` | string | "" | `~/ObsidianVault`, `..`/`;`/`$`/`&`/`|`/`*`/`?` rejected |
+| `obsidianVaultPath` | string | "" | `~/ObsidianVault`, `..`/`;`/`$`/`&`/`|`/`*`/`?` rejected, relative paths resolve under `$HOME` |
 
 Example:
 ```json
 { "id": "flowfocus", "workSec": 1500, "tickEnabled": true, "obsidianEnabled": true, "obsidianVaultPath": "~/Documents/Obsidian-Vault/sync" }
 ```
+
+Settings panel (gear icon — sound, board, timing, notes export):
+
+![FocusFlow Settings](assets/settings.png)
+
+## Remove
+```bash
+omarchy plugin remove flowfocus
+```
+State (`~/.local/state/omarchy/focusflow.json`) and exported notes files are left behind — delete them manually if desired.
 
 ## Sounds
 * `tick.ogg` (5.3K) / `tick.wav` (23K) — 0.5s mono 22k vorbis/PCM from `clock.ogg` (Focus Timer flatpak). `alarm.ogg` (142K) / `alarm.wav` (1.3M) — 30.01s mono 22k from `s8E_Ggf_QsQ` via `yt-dlp --download-sections` + `ffmpeg -ac 1 -ar 22050 -c:a libvorbis -q:a 3 / pcm_s16le`. Play: `pw-play --volume 0.5 ~/.config/omarchy/plugins/flowfocus/sounds/alarm.ogg || pw-play .../alarm.wav` (fallback `paplay`).
