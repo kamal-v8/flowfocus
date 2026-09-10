@@ -33,7 +33,12 @@ Panel {
   readonly property string phase: timer.phase
   readonly property int remainingSec: timer.remainingSec
   readonly property real timerProgress: Model.progress(state)
-  readonly property color phaseColor: Model.phaseColor(phase, Color.accent, Color.muted, Color.urgent)
+  // Theme-safe secondary tone. Color.muted is a raw theme value that can be
+  // near-invisible (e.g. rose-pine light sets muted near-white on a
+  // near-white background); first-party shell code never uses it for text.
+  // Deriving from foreground keeps contrast in dark AND light modes.
+  readonly property color dimText: Qt.darker(Color.foreground, 1.4)
+  readonly property color phaseColor: Model.phaseColor(phase, Color.accent, dimText, Color.urgent)
   readonly property string displayText: Model.formatTime(remainingSec)
   readonly property var activeTask: {
     var id = timer.activeTaskId
@@ -92,7 +97,7 @@ Panel {
         Text {
           visible: parent.parent.parent.description !== ""
           text: parent.parent.parent.description
-          color: Color.muted
+          color: root.dimText
           font.family: Style.font.family
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
@@ -205,7 +210,7 @@ Panel {
       // ---- Header row: timer info + settings gear ----
       Row {
         width: parent.width
-        spacing: Style.spacing.controlPaddingX
+        spacing: Style.space(4)
         topPadding: Style.space(2)
         bottomPadding: Style.space(1)
 
@@ -262,12 +267,10 @@ Panel {
           id: timerInfoCol
           anchors.verticalCenter: parent.verticalCenter
           spacing: 1
-          // Flexible in wide (kanban) mode so the header fills the row and the
-          // control box sits right beside the timer instead of leaving a dead
-          // strip; fixed narrow width kept for the 340px list layout.
-          width: root.panelWidth >= 500
-            ? Math.max(140, parent.width - timerRingSlot.width - controlBox.width - bellBtn.width - gearBtn.width - Style.spacing.controlPaddingX * 5)
-            : 92
+          // Flexible in both modes so the header always fits: fills the
+          // remaining row after ring + controls + bell + gear. Minimum
+          // keeps phase/time readable; extra text elides.
+          width: Math.max(70, parent.width - timerRingSlot.width - controlBox.width - bellBtn.width - gearBtn.width - Style.space(4) * 5)
 
           Text {
             text: Model.phaseLabel(root.phase)
@@ -287,7 +290,7 @@ Panel {
 
           Text {
             text: root.activeTask ? root.activeTask.text : (root.nextUp ? "Next: " + root.nextUp.text : "No tasks")
-            color: Color.muted
+            color: root.dimText
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             elide: Text.ElideRight
@@ -295,11 +298,13 @@ Panel {
           }
         }
 
-        // Compact unique control box — beside timer (not far right), separate and boxed
+        // Compact unique control box — beside timer (not far right), separate and boxed.
+        // Auto-sizes to its buttons (fixed widths overflowed: "Resume" etc.
+        // spilled outside the box). Never shrinks below content.
         Rectangle {
           id: controlBox
-          width: root.panelWidth >= 500 ? 176 : 148
-          height: 34
+          width: controlRow.implicitWidth + Style.space(8)
+          height: controlRow.implicitHeight + Style.space(8)
           radius: Style.cornerRadius
           color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.08)
           border.color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
@@ -307,37 +312,38 @@ Panel {
           anchors.verticalCenter: parent.verticalCenter
 
           Row {
+            id: controlRow
             anchors.centerIn: parent
-            spacing: root.panelWidth >= 500 ? Style.space(2) : Style.space(1)
+            spacing: Style.space(1)
             Button {
               text: root.isRunning ? "Pause" : (root.isPaused ? "Resume" : "Start")
               foreground: Color.accent
               fontSize: Style.font.caption
-              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              horizontalPadding: Style.space(2)
               verticalPadding: Style.space(2)
               onClicked: root.ff.toggleTimer()
             }
             Button {
               text: "Reset"
-              foreground: Color.muted
+              foreground: root.dimText
               fontSize: Style.font.caption
-              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              horizontalPadding: Style.space(2)
               verticalPadding: Style.space(2)
               onClicked: root.ff.resetTimer()
             }
             Button {
               text: "Skip"
-              foreground: Color.muted
+              foreground: root.dimText
               fontSize: Style.font.caption
-              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              horizontalPadding: Style.space(2)
               verticalPadding: Style.space(2)
               onClicked: root.ff.skipPhase()
             }
             Button {
               text: root.kanbanMode ? "Board" : "List"
-              foreground: root.kanbanMode ? Color.accent : Color.muted
+              foreground: root.kanbanMode ? Color.accent : root.dimText
               fontSize: Style.font.caption
-              horizontalPadding: root.panelWidth >= 500 ? Style.space(4) : Style.space(2)
+              horizontalPadding: Style.space(2)
               verticalPadding: Style.space(2)
               onClicked: {
                 root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
@@ -352,7 +358,7 @@ Panel {
         // since timerInfoCol already fills the row.
         Item {
           id: headerSpacer
-          width: Math.max(0, parent.width - timerRingSlot.width - timerInfoCol.width - controlBox.width - bellBtn.width - gearBtn.width - Style.spacing.controlPaddingX * 5)
+          width: Math.max(0, parent.width - timerRingSlot.width - timerInfoCol.width - controlBox.width - bellBtn.width - gearBtn.width - Style.space(4) * 5)
           height: 1
         }
 
@@ -360,7 +366,9 @@ Panel {
         Button {
           id: bellBtn
           text: root.ffSettings.soundMuted ? "\uf1f6" : "\uf0f3"
-          foreground: root.ffSettings.soundMuted ? Color.urgent : Color.muted
+          foreground: root.ffSettings.soundMuted ? Color.urgent : root.dimText
+          horizontalPadding: Style.space(2)
+          verticalPadding: Style.space(2)
           tooltipText: root.ffSettings.soundMuted ? "Unmute all sound (M)" : "Mute all sound (M)"
           onClicked: if (root.ff) root.ff.toggleMute()
           anchors.verticalCenter: parent.verticalCenter
@@ -370,7 +378,9 @@ Panel {
         Button {
           id: gearBtn
           text: "\uf013"
-          foreground: root.settingsVisible ? Color.accent : Color.muted
+          foreground: root.settingsVisible ? Color.accent : root.dimText
+          horizontalPadding: Style.space(2)
+          verticalPadding: Style.space(2)
           onClicked: root.settingsVisible = !root.settingsVisible
           anchors.verticalCenter: parent.verticalCenter
         }
@@ -426,13 +436,13 @@ Panel {
             Row {
               visible: root.ffSettings.tickEnabled
               spacing: Style.spacing.controlPaddingX
-              Text { text: "Tick vol"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
+              Text { text: "Tick vol"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
               PanelSlider { bar: root.bar; minimum: 0; maximum: 1; step: 0.05; value: root.ffSettings.tickVolume; onMoved: function(v){ root.ff.state.settings.tickVolume = v; root.ff.saveState() } ; onReleased: function(v){ root.ff.state.settings.tickVolume = v; root.ff.saveState(); root.ff.applyTickState() }; width: 95 }
             }
             Row {
               visible: root.ffSettings.alarmEnabled !== false
               spacing: Style.spacing.controlPaddingX
-              Text { text: "Alarm vol"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
+              Text { text: "Alarm vol"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
               PanelSlider { bar: root.bar; minimum: 0; maximum: 1; step: 0.05; value: root.ffSettings.alarmVolume; onMoved: function(v){ root.ff.state.settings.alarmVolume = v; root.ff.saveState() }; onReleased: function(v){ root.ff.state.settings.alarmVolume = v; root.ff.saveState(); root.ff.applyTickState() }; width: 95 }
             }
           }
@@ -476,7 +486,7 @@ Panel {
           rowSpacing: Style.space(2)
           Row {
             spacing: Style.spacing.controlPaddingX
-            Text { text: "Work (" + Math.round(root.ffSettings.workSec / 60) + "m)"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 54 }
+            Text { text: "Work (" + Math.round(root.ffSettings.workSec / 60) + "m)"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 54 }
             PanelSlider {
               bar: root.bar; minimum: 1; maximum: 60; step: 1; integer: true
               value: root.ffSettings.workSec / 60
@@ -487,7 +497,7 @@ Panel {
           }
           Row {
             spacing: Style.spacing.controlPaddingX
-            Text { text: "Break (" + Math.round(root.ffSettings.shortBreakSec / 60) + "m)"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 54 }
+            Text { text: "Break (" + Math.round(root.ffSettings.shortBreakSec / 60) + "m)"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 54 }
             PanelSlider {
               bar: root.bar; minimum: 1; maximum: 25; step: 1; integer: true
               value: root.ffSettings.shortBreakSec / 60
@@ -500,7 +510,7 @@ Panel {
 
         // Notes export — Obsidian or any markdown notes app (manual approve)
         PanelSeparator {}
-        Text { text: "Notes"; color: Color.muted; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        Text { text: "Notes"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
         SmallToggle {
           width: parent.width
           label: "Notes export"
@@ -538,7 +548,7 @@ Panel {
                 if (pending === 0 && total > 0) return "all pushed ✓ · " + space
                 return pending + "/" + total + " pending · " + space
               }
-              color: Color.muted
+              color: root.dimText
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               anchors.verticalCenter: parent.verticalCenter
@@ -551,7 +561,7 @@ Panel {
           Text {
             visible: !!root.ffSettings.obsidianVaultPath
             text: "→ " + root.vaultDestForActive()
-            color: Color.muted
+            color: root.dimText
             font.family: Style.font.family
             font.pixelSize: Style.font.caption - 1
             opacity: 0.85
@@ -597,7 +607,7 @@ Panel {
 
           Text {
             text: "Spaces:"
-            color: Color.muted
+            color: root.dimText
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             font.bold: true
@@ -608,7 +618,7 @@ Panel {
           Button {
             id: prevProfileBtn
             text: "◀"
-            foreground: Color.muted
+            foreground: root.dimText
             fontSize: Style.font.caption
             horizontalPadding: Style.space(3)
             verticalPadding: Style.space(2)
@@ -618,7 +628,7 @@ Panel {
           Button {
             id: nextProfileBtn
             text: "▶"
-            foreground: Color.muted
+            foreground: root.dimText
             fontSize: Style.font.caption
             horizontalPadding: Style.space(3)
             verticalPadding: Style.space(2)
@@ -649,7 +659,7 @@ Panel {
                   required property var modelData
                   property var profile: modelData
                   text: profile.name
-                  foreground: profile.id === root.activeProfileId ? Color.accent : Color.muted
+                  foreground: profile.id === root.activeProfileId ? Color.accent : root.dimText
                   fontSize: Style.font.caption
                   horizontalPadding: Style.space(4)
                   verticalPadding: Style.space(2)
@@ -704,7 +714,7 @@ Panel {
             Button {
               id: cancelBtn
               text: "✕"
-              foreground: Color.muted
+              foreground: root.dimText
               fontSize: Style.font.caption
               onClicked: { root.showProfileCreator = false; root.isRenaming = false; root.newProfileName = ""; profileInput.text = "" }
             }
@@ -720,7 +730,7 @@ Panel {
 
           Text {
             text: "Active: " + (root.activeProfile ? root.activeProfile.name : "") + " (" + Model.tasksForProfile(root.state, root.activeProfileId).length + ")"
-            color: Color.muted
+            color: root.dimText
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             anchors.verticalCenter: parent.verticalCenter
@@ -803,8 +813,8 @@ Panel {
             height: taskRow.implicitHeight + Style.space(8)
             radius: Style.cornerRadius / 2
             color: plainDelegate.isHovered ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.07)
-                  : task.done ? Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.08) : "transparent"
-            border.color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.15)
+                  : task.done ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.08) : "transparent"
+            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
             border.width: 0
 
             required property var modelData
@@ -828,7 +838,7 @@ Panel {
                 height: 18
                 radius: 4
                 color: task.done ? Color.accent : "transparent"
-                border.color: task.done ? Color.accent : Color.muted
+                border.color: task.done ? Color.accent : root.dimText
                 border.width: 1.5
                 anchors.verticalCenter: parent.verticalCenter
 
@@ -851,7 +861,7 @@ Panel {
               Text {
                 id: taskText
                 text: task.text
-                color: task.done ? Color.muted : Color.popups.text
+                color: task.done ? root.dimText : Color.popups.text
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
                 font.strikeout: task.done
@@ -866,7 +876,7 @@ Panel {
               Button {
                 id: focusBtn
                 text: task.id === root.timer.activeTaskId ? "●" : "○"
-                foreground: task.id === root.timer.activeTaskId ? Color.accent : Color.muted
+                foreground: task.id === root.timer.activeTaskId ? Color.accent : root.dimText
                 onClicked: root.ff.setActiveTask(task.id)
                 anchors.verticalCenter: parent.verticalCenter
               }
@@ -884,7 +894,7 @@ Panel {
               height: hoverRow.implicitHeight + Style.space(7)
               radius: Style.cornerRadius / 2
               color: Color.popups.background
-              border.color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.25)
+              border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.25)
               border.width: 1
               Row {
                 id: hoverRow
@@ -892,7 +902,7 @@ Panel {
                 spacing: Style.space(6)
                 Text {
                   text: "→"
-                  color: Color.muted
+                  color: root.dimText
                   font.pixelSize: Style.font.bodySmall
                   font.bold: true
                   MouseArea {
@@ -904,7 +914,7 @@ Panel {
                 }
                 Text {
                   text: "▲"
-                  color: Color.muted
+                  color: root.dimText
                   font.pixelSize: Style.font.caption
                   MouseArea {
                     anchors.fill: parent
@@ -915,7 +925,7 @@ Panel {
                 }
                 Text {
                   text: "▼"
-                  color: Color.muted
+                  color: root.dimText
                   font.pixelSize: Style.font.caption
                   MouseArea {
                     anchors.fill: parent
@@ -998,7 +1008,7 @@ Panel {
                   spacing: Style.space(4)
                   Text {
                     text: Model.COLUMN_LABELS[colId]
-                    color: Color.muted
+                    color: root.dimText
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     font.bold: true
@@ -1007,19 +1017,19 @@ Panel {
                     width: countText.implicitWidth + Style.space(6)
                     height: Style.space(12)
                     radius: height/2
-                    color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.12)
+                    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
                     Text {
                       id: countText
                       anchors.centerIn: parent
                       text: String(Model.tasksByColumn(root.state, colId, root.activeProfileId).length)
-                      color: Color.muted
+                      color: root.dimText
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption - 1
                       font.bold: true
                     }
                   }
                 }
-                Rectangle { width: parent.width; height: 1; color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.10); radius: 1 }
+                Rectangle { width: parent.width; height: 1; color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10); radius: 1 }
 
                 // Per-column vertical scroll so todo with 20+ cards isn't invisible beyond 180px cap
                 Flickable {
@@ -1049,7 +1059,7 @@ Panel {
                     radius: Style.cornerRadius
                     clip: true
                     color: task.id === root.timer.activeTaskId ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 0.04)
-                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.14)
+                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
                     border.width: task.id === root.timer.activeTaskId ? 1.5 : 1
                     HoverHandler { id: kanbanHover; onHoveredChanged: kanbanCard.isHovered = hovered }
 
@@ -1102,7 +1112,7 @@ Panel {
                         Text {
                           visible: root.ffSettings.showPomodoros !== false
                           text: task.pomodorosSpent + "/" + task.pomodorosEstimated + " 🍅"
-                          color: Color.muted
+                          color: root.dimText
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption
                         }
@@ -1121,7 +1131,7 @@ Panel {
 
                           Text {
                             text: "←"
-                            color: colId === "backlog" ? Color.muted : Color.accent
+                            color: colId === "backlog" ? root.dimText : Color.accent
                             font.pixelSize: Style.font.body
                             opacity: colId === "backlog" ? 0.35 : 1
                             MouseArea {
@@ -1138,7 +1148,7 @@ Panel {
 
                           Text {
                             text: "→"
-                            color: colId === "done" ? Color.muted : Color.accent
+                            color: colId === "done" ? root.dimText : Color.accent
                             font.pixelSize: Style.font.body
                             opacity: colId === "done" ? 0.35 : 1
                             MouseArea {
@@ -1161,7 +1171,7 @@ Panel {
                           anchors.centerIn: parent
                           Text {
                             text: "▲"
-                            color: Color.muted
+                            color: root.dimText
                             font.pixelSize: Style.font.caption
                             MouseArea {
                               anchors.fill: parent
@@ -1172,7 +1182,7 @@ Panel {
                           }
                           Text {
                             text: "▼"
-                            color: Color.muted
+                            color: root.dimText
                             font.pixelSize: Style.font.caption
                             MouseArea {
                               anchors.fill: parent
@@ -1413,7 +1423,7 @@ Panel {
         anchors.centerIn: parent
         radius: Style.cornerRadius
         color: Color.popups.background
-        border.color: Qt.rgba(Color.muted.r, Color.muted.g, Color.muted.b, 0.3)
+        border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.3)
         border.width: 1
         MouseArea { anchors.fill: parent; onClicked: {} }
 

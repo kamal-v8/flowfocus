@@ -620,7 +620,11 @@ function stopAllSounds(pluginDir) {
 }
 
 function notificationArgs(headline, body) {
-  var args = [Quickshell.env("OMARCHY_PATH") + "/bin/omarchy-notification-send", "--app-name", "FocusFlow"]
+  // Prefer the Omarchy notifier; fall back to plain notify-send when
+  // OMARCHY_PATH is unset so notifications still work on any setup.
+  var omarchyPath = Quickshell.env("OMARCHY_PATH") || ""
+  var bin = omarchyPath ? omarchyPath + "/bin/omarchy-notification-send" : "notify-send"
+  var args = [bin, "--app-name", "FocusFlow"]
   if (headline) args.push(headline)
   if (body) args.push(body)
   return args
@@ -661,8 +665,12 @@ var VAULT_SUBDIR = "focusflow"
 function expandVaultPath(settings, vaultPath) {
   var vp = sanitizeVaultPath(vaultPath !== undefined ? vaultPath : settings.obsidianVaultPath)
   if (!vp) return ""
-  if (vp.startsWith("~/")) vp = (Quickshell.env("HOME") || "") + vp.slice(1)
-  else if (vp === "~") vp = Quickshell.env("HOME") || ""
+  var home = Quickshell.env("HOME") || ""
+  if (vp.startsWith("~/")) vp = home + vp.slice(1)
+  else if (vp === "~") vp = home
+  // Bare relative paths (e.g. "Documents/notes") resolve against the shell's
+  // cwd, which varies per device — anchor them at $HOME instead.
+  else if (vp.charAt(0) !== "/" && home) vp = home + "/" + vp
   return vp
 }
 

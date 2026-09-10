@@ -37,7 +37,9 @@ BarWidget {
   readonly property string phase: timer.phase
   readonly property int remainingSec: timer.remainingSec
   readonly property real timerProgress: Model.progress(state)
-  readonly property color phaseColor: Model.phaseColor(phase, Color.accent, Color.muted, Color.urgent)
+  // Theme-safe: never Color.muted (near-invisible on light themes like rose-pine).
+  readonly property color dimText: Qt.darker(Color.foreground, 1.4)
+  readonly property color phaseColor: Model.phaseColor(phase, Color.accent, dimText, Color.urgent)
   readonly property string displayText: Model.formatTime(remainingSec)
   readonly property var activeTask: {
     var id = timer.activeTaskId
@@ -84,7 +86,14 @@ BarWidget {
       if (["workSec","shortBreakSec","longBreakSec","longBreakInterval"].indexOf(key) !== -1) val = Math.floor(Number(val))
       if (key === "tickVolume" || key === "alarmVolume") val = Number(val)
       if (["tickEnabled","alarmEnabled","soundMuted","kanbanMode","showPomodoros","autoStartBreaks","autoStartWork","notificationsEnabled","obsidianEnabled"].indexOf(key) !== -1) val = !!val
-      if (key === "obsidianVaultPath") val = String(val || "")
+      if (key === "obsidianVaultPath") {
+        val = String(val || "")
+        // An empty shell.json default must not wipe a path typed in the
+        // panel — otherwise every settings sync / shell restart resets the
+        // manually entered vault path back to "". shell.json still wins
+        // whenever it actually holds a non-empty value.
+        if (val === "" && s[key] !== "") continue
+      }
       if (s[key] !== val) {
         s[key] = val
         changed = true
