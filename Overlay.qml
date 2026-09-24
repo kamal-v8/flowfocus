@@ -479,7 +479,7 @@ Item {
       anchors.bottomMargin: 56
       radius: Style.cornerRadius
       color: Color.background
-      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
+      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.28)
       border.width: 1
       MouseArea { anchors.fill: parent; onClicked: {} }
 
@@ -572,8 +572,8 @@ Item {
                 width: 64
                 height: 48
                 radius: Style.cornerRadius
-                color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : "transparent"
-                border.color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.35) : "transparent"
+                color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
+                border.color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.35) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.18)
                 border.width: 1
                 Text {
                   anchors.centerIn: parent
@@ -621,7 +621,7 @@ Item {
                 height: parent.height
                 radius: Style.cornerRadius
                 color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
                 border.width: 1
                 Column {
                   anchors.fill: parent
@@ -765,7 +765,7 @@ Item {
                   height: progBoxCol.implicitHeight + Style.space(20)
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
                   border.width: 1
                   Column {
                     id: progBoxCol
@@ -822,7 +822,7 @@ Item {
                   height: parent.height - progBoxCol.parent.height - parent.spacing
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
                   border.width: 1
                   Column {
                     anchors.fill: parent
@@ -1002,7 +1002,7 @@ Item {
                       anchors.fill: parent
                       radius: Style.cornerRadius
                       color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.045)
-                      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+                      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
                       border.width: 1
                     }
                     Column {
@@ -1304,7 +1304,7 @@ Item {
                 id: setupCol
                 width: parent.width
                 spacing: Style.space(8)
-                Text { text: "Pomodoro"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
+                Text { text: "Pomodoro"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true; font.letterSpacing: 1 }
                 Grid {
                   width: parent.width
                   columns: 2
@@ -1316,7 +1316,7 @@ Item {
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Long break every"; value: String(root.ovSettings.longBreakInterval || 4); onDecrease: root.stepDuration("longBreakInterval", -1, 1, 12); onIncrease: root.stepDuration("longBreakInterval", 1, 1, 12) }
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Auto-start"; description: "Breaks + work chained"; checked: root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork; onClicked: { var v = !(root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork); root.call("set", { key: "autoStartBreaks", value: v }); root.call("set", { key: "autoStartWork", value: v }) } }
                 }
-                Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
+                Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true; font.letterSpacing: 1 }
                 Grid {
                   width: parent.width
                   columns: 2
@@ -1328,7 +1328,7 @@ Item {
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Tick volume"; value: Math.round((root.ovSettings.tickVolume ?? 0.3) * 100) + "%"; onDecrease: root.stepVolume("tickVolume", -0.05); onIncrease: root.stepVolume("tickVolume", 0.05) }
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Alarm volume"; value: Math.round((root.ovSettings.alarmVolume ?? 0.5) * 100) + "%"; onDecrease: root.stepVolume("alarmVolume", -0.05); onIncrease: root.stepVolume("alarmVolume", 0.05) }
                 }
-                Text { text: "Board"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
+                Text { text: "Board"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true; font.letterSpacing: 1 }
                 Grid {
                   width: parent.width
                   columns: 2
@@ -1339,7 +1339,7 @@ Item {
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Show pomodoros"; description: "🍅 on cards"; checked: root.ovSettings.showPomodoros !== false; onClicked: root.call("set", { key: "showPomodoros", value: !(root.ovSettings.showPomodoros !== false) }) }
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Notifications"; description: "Desktop on phase end"; checked: root.ovSettings.notificationsEnabled !== false; onClicked: root.call("set", { key: "notificationsEnabled", value: !(root.ovSettings.notificationsEnabled !== false) }) }
                 }
-                Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
+                Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true; font.letterSpacing: 1 }
                 OvToggle { width: parent.width; label: "Notes export"; description: root.ovSettings.obsidianEnabled ? (root.ovSettings.obsidianVaultPath || "no path set") : "Obsidian / any notes app, on approve"; checked: root.ovSettings.obsidianEnabled === true; onClicked: root.call("set", { key: "obsidianEnabled", value: !(root.ovSettings.obsidianEnabled === true) }) }
                 TextField {
                   id: notesPath
@@ -1427,7 +1427,7 @@ Item {
           text: label
           color: Color.popups.text
           font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: Style.font.body
           font.bold: true
           elide: Text.ElideRight
           width: parent.width
@@ -1463,7 +1463,7 @@ Item {
       text: label
       color: Color.popups.text
       font.family: Style.font.family
-      font.pixelSize: Style.font.caption
+      font.pixelSize: Style.font.bodySmall
       elide: Text.ElideRight
       width: parent.width - dec.width - val.width - inc.width - parent.spacing * 3
       anchors.verticalCenter: parent.verticalCenter

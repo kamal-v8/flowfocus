@@ -104,7 +104,7 @@ Panel {
           text: parent.parent.parent.label
           color: Color.foreground
           font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: Style.font.body
           font.bold: true
           elide: Text.ElideRight
           width: parent.width
@@ -738,16 +738,25 @@ Panel {
 
       PanelSeparator {}
 
-      // ---- Settings section (collapsible) — compact grid so panel doesn't become tall ----
+      // ---- Settings section — scrolls when taller than the panel ----
+      Flickable {
+        visible: root.view === "settings"
+        width: parent.width
+        height: Math.min(setCol.implicitHeight, Style.space(420))
+        contentHeight: setCol.implicitHeight
+        contentWidth: width
+        clip: true
+        flickableDirection: Flickable.VerticalFlick
+        boundsBehavior: Flickable.StopAtBounds
       Column {
+        id: setCol
         width: parent.width
         spacing: Style.space(3)
-        visible: root.view === "settings"
 
         PanelSectionHeader { text: "Settings" }
 
         // ---- Audio group ----
-        Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true }
         // Sound row — always 2-across even on 340px (166px each) to halve height
         Grid {
           width: parent.width
@@ -803,7 +812,7 @@ Panel {
         }
 
         // ---- Board & timing group ----
-        Text { text: "Board & timing"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        Text { text: "Board & timing"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true }
         // Board / Pomodoros / Continuous — always 2-across
         Grid {
           width: parent.width
@@ -880,7 +889,7 @@ Panel {
 
         // ---- Vault sync group (notes export) ----
         PanelSeparator {}
-        Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true }
         SmallToggle {
           width: parent.width
           label: "Notes export"
@@ -963,6 +972,7 @@ Panel {
         }
 
         PanelSeparator {}
+      }
       }
 
       // ---- Tasks section (Board + Todo views) ----
