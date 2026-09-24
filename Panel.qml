@@ -53,19 +53,34 @@ Panel {
   readonly property string activeProfileId: state.activeKanbanProfileId || "default"
   readonly property var profiles: state.kanbanProfiles || []
   readonly property var activeProfile: Model.getActiveProfile(state)
+  // Live per-space aggregates for the focus strip + sync dot
+  readonly property var profileTasks: Model.tasksForProfile(root.state, root.activeProfileId)
+  readonly property int profileDoneCount: profileTasks.filter(function(t){ return t.done }).length
+  readonly property int profileFocusedCount: profileTasks.reduce(function(a, t){ return a + (t.pomodorosSpent || 0) }, 0)
+  readonly property int profilePendingPush: profileTasks.filter(function(t){ return !t.pushedToObsidian || t.pushedColumn !== t.column }).length
 
   // ---- UI state ----
+  // Active view: focus | kanban | todo | settings. Ephemeral (resets to
+  // focus per shell session); kanbanMode persists the kanban/todo choice.
+  property string view: "focus"
+  property string viewBeforeSettings: "focus"
+  property string searchText: ""
   property string newTaskText: ""
   property string newProfileName: ""
-  property bool settingsVisible: false
   property bool showProfileCreator: false
   property bool isRenaming: false
   property bool showHelp: false
 
+  // Board users land on Board once state arrives after a fresh shell
+  // start; everyone else lands on Focus. Fires once (ff is injected once).
+  onFfChanged: {
+    if (root.ff && root.kanbanMode && root.view === "focus") root.view = "kanban"
+  }
+
   // ---- Layout ----
   readonly property int basePanelWidth: Style.space(340)
   readonly property int kanbanPanelWidth: Style.space(520)
-  readonly property int panelWidth: root.kanbanMode ? kanbanPanelWidth : basePanelWidth
+  readonly property int panelWidth: root.view === "kanban" ? kanbanPanelWidth : basePanelWidth
 
   // Ultra-compact toggle — dense row (32px) without BorderSurface card chrome
   // so Settings doesn't eat 4×54px cards. Uses same ToggleSwitch but inline.
@@ -114,6 +129,55 @@ Panel {
     MouseArea { anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor; onClicked: parent.clicked() }
   }
 
+  // Compact − value + stepper row for durations/counts (focus view).
+  component Stepper: Row {
+    property string label: ""
+    property string value: ""
+    signal decrease()
+    signal increase()
+    spacing: Style.space(6)
+    Text {
+      text: parent?.label ?? ""
+      color: Color.popups.text
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      elide: Text.ElideRight
+      width: parent.width - decBtn.width - valText.width - incBtn.width - parent.spacing * 3
+      anchors.verticalCenter: parent.verticalCenter
+    }
+    Button {
+      id: decBtn
+      text: "−"
+      foreground: root.dimText
+      fontSize: Style.font.caption
+      horizontalPadding: Style.space(3)
+      verticalPadding: Style.space(1)
+      onClicked: parent.decrease()
+      anchors.verticalCenter: parent.verticalCenter
+    }
+    Text {
+      id: valText
+      text: parent?.value ?? ""
+      color: Color.accent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      width: 44
+      horizontalAlignment: Text.AlignHCenter
+      anchors.verticalCenter: parent.verticalCenter
+    }
+    Button {
+      id: incBtn
+      text: "+"
+      foreground: root.dimText
+      fontSize: Style.font.caption
+      horizontalPadding: Style.space(3)
+      verticalPadding: Style.space(1)
+      onClicked: parent.increase()
+      anchors.verticalCenter: parent.verticalCenter
+    }
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -143,7 +207,7 @@ Panel {
         else if (confirmDeleteTask.opened) confirmDeleteTask.selectedIndex = confirmDeleteTask.selectedIndex === 0 ? 1 : 0
         else if (confirmDeleteProfile.opened) confirmDeleteProfile.selectedIndex = confirmDeleteProfile.selectedIndex === 0 ? 1 : 0
         else if (root.showHelp) return
-        else root.switchPanel(direction)
+        else root.cycleView(direction)
       }
       onMoveRequested: function(dx, dy) {
         // Arrow/h/l navigation doubles as dialog Left/Right toggle when a confirm is open.
@@ -207,8 +271,114 @@ Panel {
       // breathing room so progress ring doesn't clip card border
       Item { width: parent.width; height: Style.space(4) }
 
-      // ---- Header: timer hero + transport + view switcher ----
+      // ---- TopBar: mark + view switcher + sync status ----
       Column {
+        width: parent.width
+        spacing: Style.space(2)
+
+        Row {
+          width: parent.width
+          spacing: Style.space(4)
+          Text {
+            id: markGlyph
+            text: "\uf254"
+            color: Color.accent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Text {
+            id: appName
+            text: "FocusFlow"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.bodySmall
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Item {
+            width: Math.max(0, parent.width - markGlyph.width - appName.width - syncDotBtn.width - parent.spacing * 3)
+            height: 1
+          }
+          // Tiny sync indicator — dot opens Vault sync section
+          Button {
+            id: syncDotBtn
+            text: "●"
+            fontSize: Style.font.caption
+            foreground: !root.ffSettings.obsidianEnabled ? root.dimText : (root.profilePendingPush > 0 ? Color.accent : root.dimText)
+            tooltipText: !root.ffSettings.obsidianEnabled ? "Notes export off — open Vault sync" : (root.profilePendingPush > 0 ? (root.profilePendingPush + " pending — open Vault sync") : "Synced ✓ — open Vault sync")
+            horizontalPadding: Style.space(2)
+            verticalPadding: Style.space(1)
+            onClicked: root.setView("settings")
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+
+        // Four-way view switcher — Focus | Board | Todo | Setup
+        Rectangle {
+          id: viewSegBox4
+          width: parent.width
+          height: viewSegRow4.implicitHeight + Style.space(6)
+          radius: height / 2
+          color: "transparent"
+          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+          border.width: 1
+          Row {
+            id: viewSegRow4
+            anchors.centerIn: parent
+            spacing: 0
+            Button {
+              text: "Focus"
+              width: (viewSegBox4.width - Style.space(6)) / 4
+              foreground: root.view === "focus" ? Color.accent : root.dimText
+              selected: root.view === "focus"
+              radius: height / 2
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: root.setView("focus")
+            }
+            Button {
+              text: "Board"
+              width: (viewSegBox4.width - Style.space(6)) / 4
+              foreground: root.view === "kanban" ? Color.accent : root.dimText
+              selected: root.view === "kanban"
+              radius: height / 2
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: root.setView("kanban")
+            }
+            Button {
+              text: "Todo"
+              width: (viewSegBox4.width - Style.space(6)) / 4
+              foreground: root.view === "todo" ? Color.accent : root.dimText
+              selected: root.view === "todo"
+              radius: height / 2
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(2)
+              verticalPadding: Style.space(2)
+              onClicked: root.setView("todo")
+            }
+            Button {
+              text: "Setup"
+              width: (viewSegBox4.width - Style.space(6)) / 4
+              foreground: root.view === "settings" ? Color.accent : root.dimText
+              selected: root.view === "settings"
+              radius: height / 2
+              fontSize: Style.font.caption
+              horizontalPadding: Style.space(2)
+              verticalPadding: Style.space(2)
+              tooltipText: "Settings"
+              onClicked: root.toggleSettings()
+            }
+          }
+        }
+      }
+
+      // ---- Header: timer hero + transport (Focus view) ----
+      Column {
+        visible: root.view === "focus"
         width: parent.width
         spacing: Style.space(3)
 
@@ -326,10 +496,10 @@ Panel {
         Button {
           id: gearBtn
           text: ""
-          foreground: root.settingsVisible ? Color.accent : root.dimText
+          foreground: root.view === "settings" ? Color.accent : root.dimText
           horizontalPadding: Style.space(2)
           verticalPadding: Style.space(2)
-          onClicked: root.settingsVisible = !root.settingsVisible
+          onClicked: root.toggleSettings()
           anchors.verticalCenter: parent.verticalCenter
         }
         }
@@ -386,43 +556,181 @@ Panel {
             }
           }
 
-          // Segmented List | Board switcher — active side takes accent fill
-          Rectangle {
-            id: viewSegBox
-            width: viewSegRow.implicitWidth + Style.space(6)
-            height: transportBox.height
-            radius: height / 2
-            color: "transparent"
-            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
-            border.width: 1
-            anchors.verticalCenter: parent.verticalCenter
+        // Transport pill — primary action takes the accent fill.
+        // (View switching moved to the TopBar 4-way segmented control.)
+        }
+      }
 
-            Row {
-              id: viewSegRow
-              anchors.centerIn: parent
-              spacing: 0
-              Button {
-                text: "List"
-                foreground: root.kanbanMode ? root.dimText : Color.accent
-                selected: !root.kanbanMode
-                radius: height / 2
-                fontSize: Style.font.caption
-                horizontalPadding: Style.space(4)
-                verticalPadding: Style.space(2)
-                onClicked: root.setKanbanMode(false)
-              }
-              Button {
-                text: "Board"
-                foreground: root.kanbanMode ? Color.accent : root.dimText
-                selected: root.kanbanMode
-                radius: height / 2
-                fontSize: Style.font.caption
-                horizontalPadding: Style.space(4)
-                verticalPadding: Style.space(2)
-                onClicked: root.setKanbanMode(true)
-              }
+      // ---- Slim timer strip (other views): time + phase + mini transport ----
+      Row {
+        visible: root.view !== "focus"
+        width: parent.width
+        spacing: Style.space(6)
+        Text {
+          id: slimTime
+          text: root.displayText
+          color: root.phaseColor
+          font.family: Style.font.family
+          font.pixelSize: Style.font.body
+          font.bold: true
+          anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+          id: slimPhase
+          text: Model.phaseLabel(root.phase)
+          color: root.dimText
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+          anchors.verticalCenter: parent.verticalCenter
+        }
+        Item {
+          width: Math.max(0, parent.width - slimTime.width - slimPhase.width - slimPause.width - slimSkip.width - parent.spacing * 4)
+          height: 1
+        }
+        Button {
+          id: slimPause
+          text: root.isRunning ? "Pause" : (root.isPaused ? "Resume" : "Start")
+          foreground: Color.accent
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(3)
+          verticalPadding: Style.space(1)
+          onClicked: root.ff.toggleTimer()
+          anchors.verticalCenter: parent.verticalCenter
+        }
+        Button {
+          id: slimSkip
+          text: "Skip"
+          foreground: root.dimText
+          fontSize: Style.font.caption
+          horizontalPadding: Style.space(3)
+          verticalPadding: Style.space(1)
+          onClicked: root.ff.skipPhase()
+          anchors.verticalCenter: parent.verticalCenter
+        }
+      }
+
+      // ---- Focus view body: session strip + progress + duration steppers ----
+      Column {
+        visible: root.view === "focus"
+        width: parent.width
+        spacing: Style.space(3)
+
+        // Session strip — live settings, nothing decorative
+        Row {
+          width: parent.width
+          spacing: Style.space(4)
+          Text {
+            id: sessWorkDot
+            text: "●"
+            color: Color.accent
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Text {
+            id: sessWorkVal
+            text: "Work " + Math.round((root.ffSettings.workSec || 1500) / 60) + "m"
+            color: Color.popups.text
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Text {
+            id: sessBreakDot
+            text: "●"
+            color: root.dimText
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Text {
+            id: sessBreakVal
+            text: "Break " + Math.round((root.ffSettings.shortBreakSec || 300) / 60) + "m"
+            color: root.dimText
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Item {
+            width: Math.max(0, parent.width - sessWorkDot.width - sessWorkVal.width - sessBreakDot.width - sessBreakVal.width - sessCycle.width - parent.spacing * 5)
+            height: 1
+          }
+          Text {
+            id: sessCycle
+            text: "1/" + (root.ffSettings.longBreakInterval || 4)
+            color: root.dimText
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+
+        // Progress strip — done/total + focused pomodoros, active space
+        Row {
+          width: parent.width
+          spacing: Style.space(6)
+          Text {
+            id: progLabel
+            text: root.profileDoneCount + "/" + root.profileTasks.length + " done"
+            color: Color.accent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+          }
+          Item {
+            id: progTrack
+            width: Math.max(0, parent.width - progLabel.width - progCount.width - parent.spacing * 2)
+            height: 4
+            anchors.verticalCenter: parent.verticalCenter
+            Rectangle {
+              anchors.fill: parent
+              radius: 2
+              color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
+            }
+            Rectangle {
+              height: parent.height
+              width: parent.width * (root.profileTasks.length > 0 ? root.profileDoneCount / root.profileTasks.length : 0)
+              radius: 2
+              color: Color.accent
             }
           }
+          Text {
+            id: progCount
+            text: root.profileFocusedCount + " 🍅"
+            color: root.dimText
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            anchors.verticalCenter: parent.verticalCenter
+          }
+        }
+
+        // Duration steppers — same setters as the Setup sliders
+        Stepper {
+          width: parent.width
+          label: "Work duration"
+          value: Math.round((root.ffSettings.workSec || 1500) / 60) + "m"
+          onDecrease: root.adjustDuration("workSec", -1, 1, 60)
+          onIncrease: root.adjustDuration("workSec", 1, 1, 60)
+        }
+        Stepper {
+          width: parent.width
+          label: "Short break"
+          value: Math.round((root.ffSettings.shortBreakSec || 300) / 60) + "m"
+          onDecrease: root.adjustDuration("shortBreakSec", -1, 1, 25)
+          onIncrease: root.adjustDuration("shortBreakSec", 1, 1, 25)
+        }
+        Stepper {
+          width: parent.width
+          label: "Long break"
+          value: Math.round((root.ffSettings.longBreakSec || 900) / 60) + "m"
+          onDecrease: root.adjustDuration("longBreakSec", -1, 1, 60)
+          onIncrease: root.adjustDuration("longBreakSec", 1, 1, 60)
+        }
+        Stepper {
+          width: parent.width
+          label: "Long break every"
+          value: String(root.ffSettings.longBreakInterval || 4)
+          onDecrease: root.adjustDuration("longBreakInterval", -1, 1, 12)
+          onIncrease: root.adjustDuration("longBreakInterval", 1, 1, 12)
         }
       }
 
@@ -432,7 +740,7 @@ Panel {
       Column {
         width: parent.width
         spacing: Style.space(3)
-        visible: root.settingsVisible
+        visible: root.view === "settings"
 
         PanelSectionHeader { text: "Settings" }
 
@@ -641,8 +949,9 @@ Panel {
         PanelSeparator {}
       }
 
-      // ---- Tasks section ----
+      // ---- Tasks section (Board + Todo views) ----
       Row {
+        visible: root.view === "kanban" || root.view === "todo"
         width: parent.width
         spacing: Style.space(6)
         PanelSectionHeader {
@@ -663,9 +972,10 @@ Panel {
         }
       }
 
-      // Spaces switchboard — visible in List AND Board (profiles scope both).
-      // Alt+H / Alt+L and ◀ ▶ cycle from either mode.
+      // Spaces switchboard — visible in Todo AND Board (profiles scope both).
+      // Alt+H / Alt+L and ◀ ▶ cycle from either view.
       Column {
+        visible: root.view === "kanban" || root.view === "todo"
         width: parent.width
         spacing: Style.space(3)
 
@@ -834,6 +1144,7 @@ Panel {
 
       // New task input — scoped to active profile heading
       Row {
+        visible: root.view === "kanban" || root.view === "todo"
         width: parent.width
         spacing: Style.spacing.controlPaddingX
 
@@ -856,23 +1167,47 @@ Panel {
         }
       }
 
+      // Task search — filters Board columns + Todo list by title
+      TextField {
+        visible: root.view === "kanban" || root.view === "todo"
+        width: parent.width
+        placeholderText: "Search tasks…"
+        text: root.searchText
+        maximumLength: 100
+        onTextChanged: root.searchText = text.slice(0, 100)
+        Keys.onEscapePressed: function(event) { searchField.focus = false; keyCatcher.forceActiveFocus(); event.accepted = true }
+        id: searchField
+      }
+
       // Task list / kanban board
       Item {
+        visible: root.view === "kanban" || root.view === "todo"
         width: parent.width
         height: root.kanbanMode ? kanbanContainer.height : plainList.height
         implicitHeight: height
         clip: true
 
-        // Plain list mode — vertical scroll when many tasks (cap so panel doesn't blow tall) — scoped to active profile
+        // Plain list mode — Open / Completed sections, scoped to active profile
         ListView {
           id: plainList
-          visible: !root.kanbanMode
+          visible: root.view === "todo"
           width: parent.width
-          height: Math.min(contentHeight, Style.space(root.settingsVisible ? 220 : 320))
+          height: Math.min(contentHeight, Style.space(320))
           interactive: true
           clip: true
           boundsBehavior: Flickable.StopAtBounds
-          model: Model.tasksForProfile(root.state, root.activeProfileId)
+          model: Model.tasksForProfile(root.state, root.activeProfileId).filter(root.taskMatches).sort(function(a, b){ return ((a.done ? 1 : 0) - (b.done ? 1 : 0)) || ((a.createdAt || 0) - (b.createdAt || 0)) })
+          section.property: "done"
+          section.criteria: ViewSection.FullString
+          section.delegate: Text {
+            width: plainList.width
+            text: section === "true" ? ("Completed · " + root.profileDoneCount) : ("Open · " + (root.profileTasks.length - root.profileDoneCount))
+            color: root.dimText
+            font.family: Style.font.family
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 1
+          }
           spacing: 8
 
           delegate: Rectangle {
@@ -1040,10 +1375,10 @@ Panel {
         // Outer keeps horizontal flick; vertical overflow is per-column Flickable so todo's extra cards aren't clipped.
         Flickable {
           id: kanbanContainer
-          visible: root.kanbanMode
+          visible: root.view === "kanban"
           width: parent.width
           onWidthChanged: console.warn("[ff-dbg] W viewport=" + width + " rowImplicit=" + kanbanRow.implicitWidth + " kb=" + root.kanbanMode + " ffNull=" + (root.ff === null))
-          height: Math.min(contentHeight, Style.space(root.settingsVisible ? 200 : 300))
+          height: Math.min(contentHeight, Style.space(300))
           contentWidth: kanbanRow.implicitWidth
           contentHeight: kanbanRow.implicitHeight
           clip: true
@@ -1101,7 +1436,7 @@ Panel {
                     font.letterSpacing: 1
                   }
                   Rectangle {
-                    property int count: Model.tasksByColumn(root.state, colId, root.activeProfileId).length
+                    property int count: Model.tasksByColumn(root.state, colId, root.activeProfileId).filter(root.taskMatches).length
                     width: countText.implicitWidth + Style.space(8)
                     height: Style.space(14)
                     radius: height/2
@@ -1122,7 +1457,7 @@ Panel {
                 // Per-column vertical scroll so todo with 20+ cards isn't invisible beyond 180px cap
                 Flickable {
                   width: parent.width
-                  height: Math.min(colTasks.implicitHeight, Style.space(root.settingsVisible ? 150 : 260))
+                  height: Math.min(colTasks.implicitHeight, Style.space(260))
                   contentHeight: colTasks.implicitHeight
                   contentWidth: width
                   clip: true
@@ -1135,7 +1470,7 @@ Panel {
                     spacing: 8
 
                     Repeater {
-                      model: Model.tasksByColumn(root.state, colId)
+                      model: Model.tasksByColumn(root.state, colId).filter(root.taskMatches)
 
                   delegate: Rectangle {
                     id: kanbanCard
@@ -1559,12 +1894,13 @@ Panel {
             model: [
               { key: "Space", desc: "start / pause timer" },
               { key: "M", desc: "mute / unmute all sound (🔔)" },
-              { key: "Tab", desc: "switch Board ↔ List" },
+              { key: "Tab", desc: "cycle Focus → Board → Todo" },
               { key: "Alt+H / Alt+L", desc: "previous / next space" },
               { key: "○ / ●", desc: "focus a task (shows as Next)" },
               { key: "☐", desc: "toggle done" },
               { key: "← →", desc: "move card between columns" },
               { key: "hover", desc: "▲ ▼ prioritize · ⬆ push to notes · − delete" },
+              { key: "search", desc: "filter Board + Todo by title" },
               { key: "− on Done", desc: "archive [x] in notes or delete everywhere" },
               { key: "Esc", desc: "unfocus input · close popup · close panel" }
             ]
@@ -1678,13 +2014,66 @@ Panel {
     }
     keyCatcher.forceActiveFocus()
   }
-  function switchPanel(direction) {
-    setKanbanMode(!root.ffSettings.kanbanMode)
-  }
 
   function setKanbanMode(v) {
     if (!root.ff) return
     root.ff.state.settings.kanbanMode = v
+    root.ff.saveState()
+    root.ff.applyTickState()
+  }
+
+  // View switching — kanban/todo views keep the persisted kanbanMode in
+  // sync (same contract as the old List/Board toggle); focus/settings are
+  // display-only and leave it alone.
+  function setView(v) {
+    if (v === "settings" && root.view !== "settings") root.viewBeforeSettings = root.view
+    root.view = v
+    if (v === "kanban") setKanbanMode(true)
+    else if (v === "todo") setKanbanMode(false)
+  }
+
+  function cycleView(direction) {
+    var order = ["focus", "kanban", "todo"]
+    var i = order.indexOf(root.view)
+    if (i < 0) i = 0
+    var d = (direction === undefined || direction >= 0) ? 1 : -1
+    setView(order[(i + d + order.length) % order.length])
+  }
+
+  // Live title search across Board columns + Todo list
+  function taskMatches(task) {
+    var q = root.searchText.trim().toLowerCase()
+    if (!q || !task) return true
+    return (task.text || "").toLowerCase().indexOf(q) !== -1
+  }
+
+  function toggleSettings() {
+    if (root.view === "settings") setView(root.viewBeforeSettings || "focus")
+    else setView("settings")
+  }
+
+  // Minute stepper for durations — mirrors the slider commit logic so the
+  // stopped-timer display follows immediately.
+  function adjustDuration(key, delta, min, max) {
+    if (!root.ff) return
+    var s = root.ff.state.settings
+    if (key === "longBreakInterval") {
+      var cur = s.longBreakInterval || 4
+      s.longBreakInterval = Math.max(min, Math.min(max, cur + delta))
+    } else {
+      var curMin = Math.round((s[key] || 1500) / 60)
+      var nextMin = Math.max(min, Math.min(max, curMin + delta))
+      s[key] = nextMin * 60
+      if (root.ff.isStopped) {
+        var ph = root.ff.phase
+        if ((key === "workSec" && ph === Model.PHASE_WORK)
+          || (key === "shortBreakSec" && ph === Model.PHASE_SHORT_BREAK)
+          || (key === "longBreakSec" && ph === Model.PHASE_LONG_BREAK)) {
+          root.ff.state.timer.remainingSec = s[key]
+          root.ff.state.timer.phaseDurationSec = s[key]
+        }
+      }
+    }
     root.ff.saveState()
     root.ff.applyTickState()
   }
