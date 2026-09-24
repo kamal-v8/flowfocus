@@ -457,6 +457,76 @@ BarWidget {
     function show() { root.open() }
     function hide() { root.close() }
     function togglePanel() { root.togglePanel() }
+
+    // Generic mutation bridge for the fullscreen overlay (single writer stays
+    // here; the overlay reads via file watch and sends ops as one JSON arg).
+    // Returns true on success, false on unknown op / bad payload.
+    function mutate(json: string) {
+      var m = null
+      try { m = JSON.parse(String(json || "")) } catch (e) { return false }
+      if (!m || typeof m.op !== "string") return false
+      var op = m.op
+      if (op === "toggle") root.toggleTimer()
+      else if (op === "reset") root.resetTimer()
+      else if (op === "skip") root.skipPhase()
+      else if (op === "mute") root.toggleMute()
+      else if (op === "addTask") root.addTask(String(m.text || ""), String(m.column || "todo"))
+      else if (op === "toggleDone") root.toggleTaskDone(String(m.id || ""))
+      else if (op === "setActiveTask") root.setActiveTask(String(m.id || ""))
+      else if (op === "deleteTask") root.deleteTask(String(m.id || ""))
+      else if (op === "archiveTask") root.archiveDoneTask(String(m.id || ""))
+      else if (op === "moveTask") root.moveTask(String(m.id || ""), String(m.column || "todo"))
+      else if (op === "moveUp") root.moveTaskUp(String(m.id || ""))
+      else if (op === "moveDown") root.moveTaskDown(String(m.id || ""))
+      else if (op === "setProfile") root.setActiveProfile(String(m.id || ""))
+      else if (op === "createProfile") root.createProfile(String(m.name || ""))
+      else if (op === "renameProfile") root.renameProfile(String(m.id || ""), String(m.name || ""))
+      else if (op === "deleteProfile") root.deleteProfile(String(m.id || ""))
+      else if (op === "cycleProfile") root.cycleProfile(Number(m.dir) >= 0 ? 1 : -1)
+      else if (op === "pushTask") root.pushTaskToObsidian(String(m.id || ""))
+      else if (op === "undoPush") root.undoPushToObsidian(String(m.id || ""))
+      else if (op === "pushAll") root.pushAllDoneToObsidian()
+      else if (op === "set") { if (!root.applySetting(String(m.key || ""), m.value)) return false }
+      else return false
+      return true
+    }
+  }
+
+  // Whitelisted absolute setting write with shell.json-style coercion.
+  // Returns false for unknown keys so callers can report misuse.
+  function applySetting(key, value) {
+    if (!root.loaded) return false
+    var s = root.state.settings
+    var ints = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval"]
+    var reals = ["tickVolume", "alarmVolume"]
+    var bools = ["tickEnabled", "alarmEnabled", "soundMuted", "kanbanMode", "showPomodoros",
+                 "autoStartBreaks", "autoStartWork", "notificationsEnabled", "obsidianEnabled"]
+    if (ints.indexOf(key) !== -1) {
+      var n = Math.floor(Number(value))
+      if (!isFinite(n)) return false
+      s[key] = n
+      if (root.isStopped) {
+        if ((key === "workSec" && root.phase === Model.PHASE_WORK)
+          || (key === "shortBreakSec" && root.phase === Model.PHASE_SHORT_BREAK)
+          || (key === "longBreakSec" && root.phase === Model.PHASE_LONG_BREAK)) {
+          root.state.timer.remainingSec = n
+          root.state.timer.phaseDurationSec = n
+        }
+      }
+    } else if (reals.indexOf(key) !== -1) {
+      var r = Number(value)
+      if (!isFinite(r)) return false
+      s[key] = Math.max(0, Math.min(1, r))
+    } else if (bools.indexOf(key) !== -1) {
+      s[key] = (value === true || value === "true" || value === 1 || value === "1")
+    } else if (key === "obsidianVaultPath") {
+      s[key] = String(value || "").slice(0, 500)
+    } else {
+      return false
+    }
+    root.saveState()
+    root.applyTickState()
+    return true
   }
 
   WidgetButton {

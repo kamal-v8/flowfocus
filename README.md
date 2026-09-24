@@ -29,6 +29,15 @@ omarchy-shell shell rescanPlugins; omarchy plugin enable flowfocus
 * Controls: Start/Pause/Reset/Skip, Board↔List, cycle `N — M pomodoros`.
 * Kanban: `← →` move, `−` delete, `⬆` push (→ `↩` undo), `●` active. Plain: `☐` done, `○/●` focus, hover pill holds `→ ▲ ▼ ⬆ −`.
 
+## Workspace overlay
+Fullscreen 3-region UI (icon rail + main + side panels) over the same state. Popup stays for quick access.
+```bash
+omarchy-shell shell summon flowfocus '{}'                       # open (Focus view)
+omarchy-shell shell summon flowfocus '{"view":"kanban"}'        # open Board / todo / settings
+omarchy-shell shell hide flowfocus                              # close (or Esc)
+```
+Suggested keybind: `SUPER + SHIFT + F` → summon. Architecture: overlay reads `focusflow.json` live and sends all mutations to the bar widget's `mutate` IPC (single writer — no sync conflicts). Keyboard: `Space` start/pause, `Tab` cycle views, `M` mute, `Alt+H/L` spaces, `Esc` close.
+
 State: `~/.local/state/omarchy/focusflow.json` (`XDG_STATE_HOME` honoured, atomic `FileView`). `tasks[]` ≤200×200 chars, `column∈{backlog,todo,doing,done}`, `pushedToObsidian`+`pushedColumn` for idempotency.
 
 ## Configuration (`shell.json` `flowfocus` entry)

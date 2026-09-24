@@ -6,11 +6,14 @@
   "author": "kamal",
   "description": "FocusFlow — Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
   "kinds": [
-    "bar-widget"
+    "bar-widget",
+    "overlay"
   ],
   "entryPoints": {
-    "barWidget": "BarWidget.qml"
+    "barWidget": "BarWidget.qml",
+    "overlay": "Overlay.qml"
   },
+  "keepLoaded": true,
   "barWidget": {
     "displayName": "FocusFlow",
     "description": "FocusFlow — Pomodoro timer with tick-tock sound and a to-do list with plain/kanban modes",
