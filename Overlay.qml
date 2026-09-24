@@ -60,6 +60,7 @@ Item {
     id: stateFile
     path: root.statePath
     watchChanges: true
+    atomicWrites: true
     printErrors: false
     onLoaded: {
       root.state = Model.parse(text())
@@ -70,14 +71,204 @@ Item {
     }
   }
 
-  // ---- IPC bridge: every mutation runs in the bar widget ----
+  // ---- Local dispatcher: every overlay action runs here, directly on
+  // watched state (no process spawn, instant, no failure mode). The bar
+  // adopts our saves via its file watch; we adopt its tick saves via ours.
+  function ovSave() {
+    stateFile.setText(Model.serialize(root.state))
+  }
+
+  function ovApply() {
+    ovSave()
+    if (!root.viewEnabled(root.view)) root.view = "focus"
+    root.state = JSON.parse(JSON.stringify(root.state))
+  }
+
   function call(op, args) {
-    var payload = args || {}
-    payload.op = op
-    var json = ""
-    try { json = JSON.stringify(payload) } catch (e) { return }
-    if (root.shellPath === "/shell") return
-    Quickshell.execDetached(["qs", "ipc", "-n", "-p", root.shellPath, "call", "flowfocus", "mutate", json])
+    var m = args || {}
+    if (op === "toggle") root.toggleTimer()
+    else if (op === "reset") root.resetTimer()
+    else if (op === "skip") root.skipPhase()
+    else if (op === "mute") root.toggleMute()
+    else if (op === "addTask") root.addTask(String(m.text || ""), String(m.column || "todo"))
+    else if (op === "toggleDone") root.toggleTaskDone(String(m.id || ""))
+    else if (op === "setActiveTask") root.setActiveTask(String(m.id || ""))
+    else if (op === "deleteTask") root.deleteTask(String(m.id || ""))
+    else if (op === "archiveTask") root.archiveDoneTask(String(m.id || ""))
+    else if (op === "moveTask") root.moveTask(String(m.id || ""), String(m.column || "todo"))
+    else if (op === "moveUp") root.moveTaskUp(String(m.id || ""))
+    else if (op === "moveDown") root.moveTaskDown(String(m.id || ""))
+    else if (op === "setProfile") root.setActiveProfile(String(m.id || ""))
+    else if (op === "createProfile") root.createProfile(String(m.name || ""))
+    else if (op === "cycleProfile") root.cycleProfile(Number(m.dir) >= 0 ? 1 : -1)
+    else if (op === "pushTask") root.pushTaskToObsidian(String(m.id || ""))
+    else if (op === "undoPush") root.undoPushToObsidian(String(m.id || ""))
+    else if (op === "pushAll") root.pushAllDoneToObsidian()
+    else if (op === "set") root.applySetting(String(m.key || ""), m.value)
+  }
+
+  function toggleTimer() {
+    if (root.isRunning) root.pauseTimer()
+    else if (root.isPaused) root.resumeTimer()
+    else root.startTimer()
+  }
+
+  function startTimer() { root.state = Model.startTimer(root.state); ovApply() }
+  function pauseTimer() { root.state = Model.pauseTimer(root.state); ovApply() }
+  function resumeTimer() { root.state = Model.resumeTimer(root.state); ovApply() }
+  function resetTimer() { root.state = Model.resetTimer(root.state); ovApply() }
+  function skipPhase() { root.state = Model.skipPhase(root.state); ovApply() }
+
+  function toggleMute() {
+    root.state.settings.soundMuted = !root.state.settings.soundMuted
+    if (root.state.settings.soundMuted) Model.stopAllSounds(root.pluginDir)
+    ovApply()
+  }
+
+  function addTask(text, column) {
+    root.state = Model.addTask(root.state, text, column)
+    ovApply()
+  }
+
+  function toggleTaskDone(id) {
+    root.state = Model.toggleTaskDone(root.state, id)
+    ovApply()
+  }
+
+  function setActiveTask(id) {
+    root.state = Model.setActiveTask(root.state, id)
+    ovApply()
+  }
+
+  function isNotesLinked() {
+    return root.state.settings.obsidianEnabled === true
+        && Model.expandVaultPath(root.state.settings, undefined) !== ""
+  }
+
+  function deleteTask(id) {
+    var task = null
+    for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
+    if (task) {
+      var prof = Model.getProfileById(root.state, task.profileId || "default")
+      var profName = prof ? prof.name : (task.profileId || "Default")
+      Model.removeTaskFromVault(root.pluginDir, root.state.settings, task, undefined, profName)
+    }
+    root.state = Model.deleteTask(root.state, id)
+    ovApply()
+  }
+
+  function archiveDoneTask(id) {
+    var task = null
+    for (var j = 0; j < root.state.tasks.length; j++) if (root.state.tasks[j].id === id) { task = root.state.tasks[j]; break }
+    if (!task) return
+    if (!isNotesLinked()) {
+      root.state = Model.deleteTask(root.state, id)
+      ovApply()
+      return
+    }
+    var aprof = Model.getProfileById(root.state, task.profileId || "default")
+    var aprofName = aprof ? aprof.name : (task.profileId || "Default")
+    var snapshot = JSON.parse(JSON.stringify(task))
+    snapshot.column = "done"
+    snapshot.done = true
+    var ok = Model.appendTaskToVault(root.pluginDir, root.state.settings, snapshot, undefined, aprofName)
+    if (!ok) return
+    root.state = Model.deleteTask(root.state, id)
+    ovApply()
+  }
+
+  function moveTask(id, column) {
+    root.state = Model.moveTask(root.state, id, column)
+    ovApply()
+  }
+
+  function moveTaskUp(id) {
+    root.state = Model.moveTaskUp(root.state, id)
+    ovApply()
+  }
+
+  function moveTaskDown(id) {
+    root.state = Model.moveTaskDown(root.state, id)
+    ovApply()
+  }
+
+  function cycleProfile(dir) {
+    root.state = Model.cycleKanbanProfile(root.state, dir)
+    ovApply()
+  }
+
+  function setActiveProfile(id) {
+    root.state = Model.setActiveKanbanProfile(root.state, id)
+    ovApply()
+  }
+
+  function createProfile(name) {
+    root.state = Model.createKanbanProfile(root.state, name)
+    ovApply()
+  }
+
+  function pushTaskToObsidian(id) {
+    var task = null
+    for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
+    if (!task) return
+    if (task.pushedToObsidian && task.pushedColumn === task.column) return
+    var prof = Model.getProfileById(root.state, task.profileId || "default")
+    var profName = prof ? prof.name : (task.profileId || "Default")
+    if (Model.appendTaskToVault(root.pluginDir, root.state.settings, task, undefined, profName)) {
+      root.state = Model.markTaskPushed(root.state, id)
+      ovApply()
+    }
+  }
+
+  function undoPushToObsidian(id) {
+    var task = null
+    for (var i = 0; i < root.state.tasks.length; i++) if (root.state.tasks[i].id === id) { task = root.state.tasks[i]; break }
+    if (!task || !task.pushedToObsidian) return
+    var prof = Model.getProfileById(root.state, task.profileId || "default")
+    var profName = prof ? prof.name : (task.profileId || "Default")
+    if (Model.removeTaskFromVault(root.pluginDir, root.state.settings, task, undefined, profName)) {
+      root.state = Model.clearTaskPushed(root.state, id)
+      ovApply()
+    }
+  }
+
+  function pushAllDoneToObsidian() {
+    var activeId = Model.getActiveProfileId(root.state)
+    var pending = Model.tasksForProfile(root.state, activeId).filter(function(t){ return !t.pushedToObsidian || t.pushedColumn !== t.column })
+    for (var i = 0; i < pending.length; i++) {
+      var prof = Model.getProfileById(root.state, pending[i].profileId || "default")
+      var profName = prof ? prof.name : (pending[i].profileId || "Default")
+      if (Model.appendTaskToVault(root.pluginDir, root.state.settings, pending[i], undefined, profName)) {
+        root.state = Model.markTaskPushed(root.state, pending[i].id)
+      }
+    }
+    ovApply()
+  }
+
+  // Whitelisted absolute setting write (mirrors the bar's applySetting)
+  function applySetting(key, value) {
+    var s = root.state.settings
+    var ints = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval"]
+    var reals = ["tickVolume", "alarmVolume"]
+    var bools = ["tickEnabled", "alarmEnabled", "soundMuted", "kanbanMode", "showPomodoros",
+                 "autoStartBreaks", "autoStartWork", "notificationsEnabled", "obsidianEnabled",
+                 "todoEnabled", "kanbanEnabled"]
+    if (ints.indexOf(key) !== -1) {
+      var n = Math.floor(Number(value))
+      if (!isFinite(n)) return
+      s[key] = n
+    } else if (reals.indexOf(key) !== -1) {
+      var r = Number(value)
+      if (!isFinite(r)) return
+      s[key] = Math.max(0, Math.min(1, r))
+    } else if (bools.indexOf(key) !== -1) {
+      s[key] = (value === true || value === "true" || value === 1 || value === "1")
+    } else if (key === "obsidianVaultPath") {
+      s[key] = String(value || "").slice(0, 500)
+    } else {
+      return
+    }
+    ovApply()
   }
 
   // True while typing in any overlay input — letter shortcuts stay off
@@ -108,7 +299,7 @@ Item {
     try {
       if (payload) {
         var args = JSON.parse(payload) || {}
-        if (typeof args.view === "string" && ["focus", "kanban", "todo", "settings"].indexOf(args.view) !== -1) root.view = args.view
+        if (typeof args.view === "string" && ["focus", "kanban", "todo", "settings"].indexOf(args.view) !== -1) root.setView(args.view)
       }
     } catch (e) {}
     try { root.state = Model.parse(stateFile.text()) } catch (e) {}
@@ -172,25 +363,25 @@ Item {
         sequence: "f"
         context: Qt.WindowShortcut
         enabled: root.opened && !root.typing
-        onActivated: root.view = "focus"
+        onActivated: root.setView("focus")
       }
       Shortcut {
         sequence: "k"
         context: Qt.WindowShortcut
         enabled: root.opened && !root.typing
-        onActivated: root.view = "kanban"
+        onActivated: root.setView("kanban")
       }
       Shortcut {
         sequence: "t"
         context: Qt.WindowShortcut
         enabled: root.opened && !root.typing
-        onActivated: root.view = "todo"
+        onActivated: root.setView("todo")
       }
       Shortcut {
         sequence: "s"
         context: Qt.WindowShortcut
         enabled: root.opened && !root.typing
-        onActivated: root.view = "settings"
+        onActivated: root.setView("settings")
       }
       Shortcut {
         sequence: "Alt+H"
@@ -347,7 +538,7 @@ Item {
             fontSize: Style.font.caption
             foreground: !root.ovSettings.obsidianEnabled ? root.dimText : (root.profilePendingPush > 0 ? Color.accent : root.dimText)
             tooltipText: !root.ovSettings.obsidianEnabled ? "Notes export off — open Setup" : (root.profilePendingPush > 0 ? (root.profilePendingPush + " pending — open Setup") : "Synced ✓ — open Setup")
-            onClicked: root.view = "settings"
+            onClicked: root.setView("settings")
             anchors.verticalCenter: parent.verticalCenter
           }
           Button {
@@ -374,12 +565,8 @@ Item {
             height: parent.height
             spacing: Style.space(4)
             Repeater {
-              model: [
-                { id: "focus", key: "F", tip: "Focus timer" },
-                { id: "kanban", key: "K", tip: "Kanban board" },
-                { id: "todo", key: "T", tip: "To-Do list" },
-                { id: "settings", key: "S", tip: "Settings" }
-              ]
+              id: railRep
+              model: root.railItems()
               delegate: Rectangle {
                 required property var modelData
                 width: 64
@@ -399,11 +586,11 @@ Item {
                 MouseArea {
                   anchors.fill: parent
                   cursorShape: Qt.PointingHandCursor
-                  onClicked: root.view = modelData.id
+                  onClicked: root.setView(modelData.id)
                 }
               }
             }
-            Item { width: 64; height: Math.max(0, parent.height - 4 * 48 - parent.spacing * 4 - syncDot.height - parent.spacing) }
+            Item { width: 64; height: Math.max(0, parent.height - railRep.count * 48 - parent.spacing * 4 - syncDot.height - parent.spacing) }
             Text {
               id: syncDot
               width: 64
@@ -723,7 +910,7 @@ Item {
                   foreground: root.view === "kanban" ? Color.accent : root.dimText
                   selected: root.view === "kanban"
                   fontSize: Style.font.bodySmall
-                  onClicked: root.view = "kanban"
+                  onClicked: root.setView("kanban")
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 Button {
@@ -731,7 +918,7 @@ Item {
                   foreground: root.view === "todo" ? Color.accent : root.dimText
                   selected: root.view === "todo"
                   fontSize: Style.font.bodySmall
-                  onClicked: root.view = "todo"
+                  onClicked: root.setView("todo")
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 TextField {
@@ -1147,6 +1334,8 @@ Item {
                   columns: 2
                   columnSpacing: Style.space(12)
                   rowSpacing: Style.space(4)
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "To-Do view"; description: "Todo section enabled"; checked: root.ovSettings.todoEnabled !== false; onClicked: root.applySetting("todoEnabled", !(root.ovSettings.todoEnabled !== false)) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Kanban view"; description: "Board section enabled"; checked: root.ovSettings.kanbanEnabled !== false; onClicked: root.applySetting("kanbanEnabled", !(root.ovSettings.kanbanEnabled !== false)) }
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Show pomodoros"; description: "🍅 on cards"; checked: root.ovSettings.showPomodoros !== false; onClicked: root.call("set", { key: "showPomodoros", value: !(root.ovSettings.showPomodoros !== false) }) }
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Notifications"; description: "Desktop on phase end"; checked: root.ovSettings.notificationsEnabled !== false; onClicked: root.call("set", { key: "notificationsEnabled", value: !(root.ovSettings.notificationsEnabled !== false) }) }
                 }
@@ -1322,10 +1511,30 @@ Item {
   }
 
   function cycleView(dir) {
-    var order = ["focus", "kanban", "todo"]
+    var order = ["focus", "kanban", "todo"].filter(root.viewEnabled)
+    if (order.length === 0) return
     var i = order.indexOf(root.view)
     if (i < 0) i = 0
     var d = (dir === undefined || dir >= 0) ? 1 : -1
     root.view = order[(i + d + order.length) % order.length]
+  }
+
+  function setView(v) {
+    if (!root.viewEnabled(v)) v = "focus"
+    root.view = v
+  }
+
+  function viewEnabled(v) {
+    if (v === "kanban") return root.ovSettings.kanbanEnabled !== false
+    if (v === "todo") return root.ovSettings.todoEnabled !== false
+    return true
+  }
+
+  function railItems() {
+    var items = [{ id: "focus", key: "F", tip: "Focus timer" }]
+    if (root.viewEnabled("kanban")) items.push({ id: "kanban", key: "K", tip: "Kanban board" })
+    if (root.viewEnabled("todo")) items.push({ id: "todo", key: "T", tip: "To-Do list" })
+    items.push({ id: "settings", key: "S", tip: "Settings" })
+    return items
   }
 }

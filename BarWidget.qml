@@ -54,7 +54,7 @@ BarWidget {
   FileView {
     id: stateFile
     path: root.statePath
-    watchChanges: false
+    watchChanges: true
     atomicWrites: true
     printErrors: false
     onLoaded: {
@@ -62,6 +62,11 @@ BarWidget {
       root.loaded = true
       root.syncSettingsFromShellJson()
       root.applyTickState()
+    }
+    onTextChanged: {
+      // External writer (overlay) changed the file — adopt it so the next
+      // tick or action never clobbers it. Own saves re-parse harmlessly.
+      if (root.loaded) root.state = Model.parse(text())
     }
   }
 
@@ -75,7 +80,7 @@ BarWidget {
   function syncSettingsFromShellJson() {
     var s = root.state.settings
     var keys = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval",
-                "tickEnabled", "tickVolume", "alarmEnabled", "alarmVolume", "soundMuted", "kanbanMode", "showPomodoros", "autoStartBreaks",
+                "tickEnabled", "tickVolume", "alarmEnabled", "alarmVolume", "soundMuted", "kanbanMode", "todoEnabled", "kanbanEnabled", "showPomodoros", "autoStartBreaks",
                 "autoStartWork", "notificationsEnabled", "obsidianEnabled", "obsidianVaultPath"]
     var changed = false
     for (var i = 0; i < keys.length; i++) {
@@ -85,7 +90,7 @@ BarWidget {
       // coerce numeric types from shell.json schema (int/real may come as number or string)
       if (["workSec","shortBreakSec","longBreakSec","longBreakInterval"].indexOf(key) !== -1) val = Math.floor(Number(val))
       if (key === "tickVolume" || key === "alarmVolume") val = Number(val)
-      if (["tickEnabled","alarmEnabled","soundMuted","kanbanMode","showPomodoros","autoStartBreaks","autoStartWork","notificationsEnabled","obsidianEnabled"].indexOf(key) !== -1) val = !!val
+      if (["tickEnabled","alarmEnabled","soundMuted","kanbanMode","todoEnabled","kanbanEnabled","showPomodoros","autoStartBreaks","autoStartWork","notificationsEnabled","obsidianEnabled"].indexOf(key) !== -1) val = !!val
       if (key === "obsidianVaultPath") {
         val = String(val || "")
         // An empty shell.json default must not wipe a path typed in the
@@ -127,6 +132,9 @@ BarWidget {
   }
 
   function onTick() {
+    // Re-read first: the overlay may have written since the last tick.
+    // Atomic writes mean we never see a partial file here.
+    root.state = Model.parse(stateFile.text())
     var result = Model.tick(root.state)
     var phaseEnded = result.phaseEnded
     root.state = result.state
@@ -499,7 +507,7 @@ BarWidget {
     var s = root.state.settings
     var ints = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval"]
     var reals = ["tickVolume", "alarmVolume"]
-    var bools = ["tickEnabled", "alarmEnabled", "soundMuted", "kanbanMode", "showPomodoros",
+    var bools = ["tickEnabled", "alarmEnabled", "soundMuted", "kanbanMode", "todoEnabled", "kanbanEnabled", "showPomodoros",
                  "autoStartBreaks", "autoStartWork", "notificationsEnabled", "obsidianEnabled"]
     if (ints.indexOf(key) !== -1) {
       var n = Math.floor(Number(value))

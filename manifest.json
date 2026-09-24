@@ -90,6 +90,16 @@
         "label": "Use kanban board instead of plain list"
       },
       {
+        "key": "todoEnabled",
+        "type": "bool",
+        "label": "Enable To-Do view"
+      },
+      {
+        "key": "kanbanEnabled",
+        "type": "bool",
+        "label": "Enable Kanban view"
+      },
+      {
         "key": "showPomodoros",
         "type": "bool",
         "label": "Show pomodoro counter on kanban cards"

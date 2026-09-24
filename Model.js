@@ -51,6 +51,8 @@ function defaultState() {
       alarmVolume: 0.5,
       soundMuted: false,
       kanbanMode: false,
+      todoEnabled: true,
+      kanbanEnabled: true,
       showPomodoros: true,
       autoStartBreaks: false,
       autoStartWork: false,

@@ -329,7 +329,7 @@ Panel {
             spacing: 0
             Button {
               text: "Focus"
-              width: (viewSegBox4.width - Style.space(6)) / 4
+              width: (viewSegBox4.width - Style.space(6)) / root.enabledViewCount
               foreground: root.view === "focus" ? Color.accent : root.dimText
               selected: root.view === "focus"
               radius: height / 2
@@ -340,7 +340,8 @@ Panel {
             }
             Button {
               text: "Board"
-              width: (viewSegBox4.width - Style.space(6)) / 4
+              visible: root.viewEnabled("kanban")
+              width: (viewSegBox4.width - Style.space(6)) / root.enabledViewCount
               foreground: root.view === "kanban" ? Color.accent : root.dimText
               selected: root.view === "kanban"
               radius: height / 2
@@ -351,7 +352,8 @@ Panel {
             }
             Button {
               text: "Todo"
-              width: (viewSegBox4.width - Style.space(6)) / 4
+              visible: root.viewEnabled("todo")
+              width: (viewSegBox4.width - Style.space(6)) / root.enabledViewCount
               foreground: root.view === "todo" ? Color.accent : root.dimText
               selected: root.view === "todo"
               radius: height / 2
@@ -362,7 +364,7 @@ Panel {
             }
             Button {
               text: "Setup"
-              width: (viewSegBox4.width - Style.space(6)) / 4
+              width: (viewSegBox4.width - Style.space(6)) / root.enabledViewCount
               foreground: root.view === "settings" ? Color.accent : root.dimText
               selected: root.view === "settings"
               radius: height / 2
@@ -828,6 +830,20 @@ Panel {
             description: "Auto-start breaks/work"
             checked: root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork
             onClicked: { var v = !(root.ffSettings.autoStartBreaks && root.ffSettings.autoStartWork); root.ff.state.settings.autoStartBreaks = v; root.ff.state.settings.autoStartWork = v; root.ff.saveState(); root.ff.applyTickState() }
+          }
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "To-Do view"
+            description: "Todo section enabled"
+            checked: root.ffSettings.todoEnabled !== false
+            onClicked: { root.ff.state.settings.todoEnabled = !(root.ffSettings.todoEnabled !== false); if (root.ff.state.settings.todoEnabled === false && root.view === "todo") root.setView("focus"); root.ff.saveState(); root.ff.applyTickState() }
+          }
+          SmallToggle {
+            width: (parent.width - parent.columnSpacing)/2
+            label: "Kanban view"
+            description: "Board section enabled"
+            checked: root.ffSettings.kanbanEnabled !== false
+            onClicked: { root.ff.state.settings.kanbanEnabled = !(root.ffSettings.kanbanEnabled !== false); if (root.ff.state.settings.kanbanEnabled === false && root.view === "kanban") root.setView("focus"); root.ff.saveState(); root.ff.applyTickState() }
           }
           Item { width: (parent.width - parent.columnSpacing)/2; height: 32 } // spacer to keep grid even
         }
@@ -2025,7 +2041,16 @@ Panel {
   // View switching — kanban/todo views keep the persisted kanbanMode in
   // sync (same contract as the old List/Board toggle); focus/settings are
   // display-only and leave it alone.
+  function viewEnabled(v) {
+    if (v === "kanban") return root.ffSettings.kanbanEnabled !== false
+    if (v === "todo") return root.ffSettings.todoEnabled !== false
+    return true
+  }
+
+  readonly property int enabledViewCount: 2 + (root.viewEnabled("kanban") ? 1 : 0) + (root.viewEnabled("todo") ? 1 : 0)
+
   function setView(v) {
+    if (!root.viewEnabled(v)) v = "focus"
     if (v === "settings" && root.view !== "settings") root.viewBeforeSettings = root.view
     root.view = v
     if (v === "kanban") setKanbanMode(true)
@@ -2033,7 +2058,8 @@ Panel {
   }
 
   function cycleView(direction) {
-    var order = ["focus", "kanban", "todo"]
+    var order = ["focus", "kanban", "todo"].filter(root.viewEnabled)
+    if (order.length === 0) return
     var i = order.indexOf(root.view)
     if (i < 0) i = 0
     var d = (direction === undefined || direction >= 0) ? 1 : -1
