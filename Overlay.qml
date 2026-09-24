@@ -71,6 +71,18 @@ Item {
     }
   }
 
+  // Display poll — file watchers can miss rapid successive saves, so while
+  // open we re-read every second (read-only; never writes, never sounds).
+  Timer {
+    id: refreshTimer
+    interval: 1000
+    repeat: true
+    running: root.opened
+    onTriggered: {
+      if (root.loaded) root.state = Model.parse(stateFile.text())
+    }
+  }
+
   // ---- Local dispatcher: every overlay action runs here, directly on
   // watched state (no process spawn, instant, no failure mode). The bar
   // adopts our saves via its file watch; we adopt its tick saves via ours.
@@ -573,7 +585,7 @@ Item {
                 height: 48
                 radius: Style.cornerRadius
                 color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                border.color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.35) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.18)
+                border.color: root.view === modelData.id ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.35) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.30)
                 border.width: 1
                 Text {
                   anchors.centerIn: parent
@@ -621,7 +633,7 @@ Item {
                 height: parent.height
                 radius: Style.cornerRadius
                 color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
                 border.width: 1
                 Column {
                   anchors.fill: parent
@@ -765,7 +777,7 @@ Item {
                   height: progBoxCol.implicitHeight + Style.space(20)
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
                   border.width: 1
                   Column {
                     id: progBoxCol
@@ -822,7 +834,7 @@ Item {
                   height: parent.height - progBoxCol.parent.height - parent.spacing
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
                   border.width: 1
                   Column {
                     anchors.fill: parent
@@ -1002,7 +1014,7 @@ Item {
                       anchors.fill: parent
                       radius: Style.cornerRadius
                       color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.045)
-                      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+                      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
                       border.width: 1
                     }
                     Column {
