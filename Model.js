@@ -138,6 +138,24 @@ function parse(raw) {
   }
 }
 
+// Strict variant for adopting EXTERNAL content (file watch / poll): returns
+// null on anything that is not intact state, so a torn write can never be
+// adopted and then saved back over good data.
+function parseOrNull(raw) {
+  if (!raw) return null
+  try {
+    var parsed = JSON.parse(String(raw))
+    if (!parsed || typeof parsed !== "object") return null
+    if (!parsed.timer || typeof parsed.timer !== "object") return null
+    if (typeof parsed.timer.remainingSec !== "number") return null
+    if (!parsed.settings || typeof parsed.settings !== "object") return null
+    if (!Array.isArray(parsed.tasks)) return null
+    return mergeDefaults(parsed, defaultState())
+  } catch (e) {
+    return null
+  }
+}
+
 function isPlainObject(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v)
 }
@@ -777,6 +795,7 @@ if (typeof module !== "undefined") {
     defaultState: defaultState,
     defaultKanbanProfiles: defaultKanbanProfiles,
     parse: parse,
+    parseOrNull: parseOrNull,
     serialize: serialize,
     phaseDurationSec: phaseDurationSec,
     nextPhase: nextPhase,

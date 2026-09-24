@@ -55,7 +55,9 @@ BarWidget {
     id: stateFile
     path: root.statePath
     watchChanges: true
-    atomicWrites: true
+    // NOTE: atomicWrites must stay OFF — atomic rename swaps the inode and
+    // permanently detaches inotify watchers (frozen display + lost updates).
+    atomicWrites: false
     printErrors: false
     onLoaded: {
       root.state = Model.parse(text())
@@ -66,8 +68,15 @@ BarWidget {
     onTextChanged: {
       // External writer (overlay) changed the file — adopt it so the next
       // tick or action never clobbers it. Own saves re-parse harmlessly.
-      if (root.loaded) root.state = Model.parse(text())
+      // parseOrNull: torn writes are ignored, never adopted.
+      if (root.loaded) {
+        var ext = Model.parseOrNull(text())
+        if (ext) root.state = ext
+      }
     }
+    // Per the FileView contract, watched content only refreshes via
+    // reload() — without this, text() serves the load-time snapshot forever.
+    onFileChanged: reload()
   }
 
   function saveState() {
@@ -133,8 +142,9 @@ BarWidget {
 
   function onTick() {
     // Re-read first: the overlay may have written since the last tick.
-    // Atomic writes mean we never see a partial file here.
-    root.state = Model.parse(stateFile.text())
+    // parseOrNull keeps memory state on torn reads (never adopt garbage).
+    // Memory state is authoritative here: the file watch + reload keeps it
+    // fresh, and re-reading text() mid-tick risks adopting a stale snapshot.
     var result = Model.tick(root.state)
     var phaseEnded = result.phaseEnded
     root.state = result.state

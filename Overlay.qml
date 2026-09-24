@@ -60,26 +60,34 @@ Item {
     id: stateFile
     path: root.statePath
     watchChanges: true
-    atomicWrites: true
+    // NOTE: atomicWrites must stay OFF — atomic rename swaps the inode and
+    // permanently detaches inotify watchers (frozen display + lost updates).
+    atomicWrites: false
     printErrors: false
     onLoaded: {
       root.state = Model.parse(text())
       root.loaded = true
     }
     onTextChanged: {
-      if (root.loaded) root.state = Model.parse(text())
+      if (root.loaded) {
+        var ext = Model.parseOrNull(text())
+        if (ext) root.state = ext
+      }
     }
+    // Per the FileView contract, watched content only refreshes via
+    // reload() — without this, text() serves the load-time snapshot forever.
+    onFileChanged: reload()
   }
 
-  // Display poll — file watchers can miss rapid successive saves, so while
-  // open we re-read every second (read-only; never writes, never sounds).
+  // Display poll — recovery if an inotify event is ever missed: reload, and
+  // adoption happens uniformly in onTextChanged above.
   Timer {
     id: refreshTimer
     interval: 1000
     repeat: true
     running: root.opened
     onTriggered: {
-      if (root.loaded) root.state = Model.parse(stateFile.text())
+      if (root.loaded) stateFile.reload()
     }
   }
 
