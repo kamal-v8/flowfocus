@@ -207,12 +207,16 @@ Panel {
       // breathing room so progress ring doesn't clip card border
       Item { width: parent.width; height: Style.space(4) }
 
-      // ---- Header row: timer info + settings gear ----
-      Row {
+      // ---- Header: timer hero + transport + view switcher ----
+      Column {
         width: parent.width
-        spacing: Style.space(4)
-        topPadding: Style.space(2)
-        bottomPadding: Style.space(1)
+        spacing: Style.space(3)
+
+        Row {
+          width: parent.width
+          spacing: Style.space(4)
+          topPadding: Style.space(2)
+          bottomPadding: Style.space(1)
 
         // Progress ring + icon
         Item {
@@ -267,17 +271,17 @@ Panel {
           id: timerInfoCol
           anchors.verticalCenter: parent.verticalCenter
           spacing: 1
-          // Flexible in both modes so the header always fits: fills the
-          // remaining row after ring + controls + bell + gear. Minimum
-          // keeps phase/time readable; extra text elides.
-          width: Math.max(70, parent.width - timerRingSlot.width - controlBox.width - bellBtn.width - gearBtn.width - Style.space(4) * 5)
+          // Fills the hero row after ring + bell + gear; transport lives on
+          // its own row below so the time stays dominant at any width.
+          width: Math.max(70, parent.width - timerRingSlot.width - bellBtn.width - gearBtn.width - Style.space(4) * 3)
 
           Text {
-            text: Model.phaseLabel(root.phase)
-            color: Color.popups.text
+            text: ("Phase · " + Model.phaseLabel(root.phase)).toUpperCase()
+            color: root.dimText
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
             font.bold: true
+            font.letterSpacing: 1
           }
 
           Text {
@@ -298,67 +302,11 @@ Panel {
           }
         }
 
-        // Compact unique control box — beside timer (not far right), separate and boxed.
-        // Auto-sizes to its buttons (fixed widths overflowed: "Resume" etc.
-        // spilled outside the box). Never shrinks below content.
-        Rectangle {
-          id: controlBox
-          width: controlRow.implicitWidth + Style.space(8)
-          height: controlRow.implicitHeight + Style.space(8)
-          radius: Style.cornerRadius
-          color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.08)
-          border.color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
-          border.width: 1
-          anchors.verticalCenter: parent.verticalCenter
-
-          Row {
-            id: controlRow
-            anchors.centerIn: parent
-            spacing: Style.space(1)
-            Button {
-              text: root.isRunning ? "Pause" : (root.isPaused ? "Resume" : "Start")
-              foreground: Color.accent
-              fontSize: Style.font.caption
-              horizontalPadding: Style.space(2)
-              verticalPadding: Style.space(2)
-              onClicked: root.ff.toggleTimer()
-            }
-            Button {
-              text: "Reset"
-              foreground: root.dimText
-              fontSize: Style.font.caption
-              horizontalPadding: Style.space(2)
-              verticalPadding: Style.space(2)
-              onClicked: root.ff.resetTimer()
-            }
-            Button {
-              text: "Skip"
-              foreground: root.dimText
-              fontSize: Style.font.caption
-              horizontalPadding: Style.space(2)
-              verticalPadding: Style.space(2)
-              onClicked: root.ff.skipPhase()
-            }
-            Button {
-              text: root.kanbanMode ? "Board" : "List"
-              foreground: root.kanbanMode ? Color.accent : root.dimText
-              fontSize: Style.font.caption
-              horizontalPadding: Style.space(2)
-              verticalPadding: Style.space(2)
-              onClicked: {
-                root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
-                root.ff.saveState()
-                root.ff.applyTickState()
-              }
-            }
-          }
-        }
-
         // Spacer keeps bell + gear at far right; absorbs only rounding slack
         // since timerInfoCol already fills the row.
         Item {
           id: headerSpacer
-          width: Math.max(0, parent.width - timerRingSlot.width - timerInfoCol.width - controlBox.width - bellBtn.width - gearBtn.width - Style.space(4) * 5)
+          width: Math.max(0, parent.width - timerRingSlot.width - timerInfoCol.width - bellBtn.width - gearBtn.width - Style.space(4) * 3)
           height: 1
         }
 
@@ -377,12 +325,104 @@ Panel {
         // Settings gear icon
         Button {
           id: gearBtn
-          text: "\uf013"
+          text: ""
           foreground: root.settingsVisible ? Color.accent : root.dimText
           horizontalPadding: Style.space(2)
           verticalPadding: Style.space(2)
           onClicked: root.settingsVisible = !root.settingsVisible
           anchors.verticalCenter: parent.verticalCenter
+        }
+        }
+
+        // Transport + view row: pill action group + segmented List/Board
+        Row {
+          width: parent.width
+          spacing: Style.space(4)
+
+          // Pill transport group — primary action takes the accent fill.
+          // Auto-width: never clips "Resume" etc. at any theme scale.
+          Rectangle {
+            id: transportBox
+            width: transportRow.implicitWidth + Style.space(8)
+            height: transportRow.implicitHeight + Style.space(8)
+            radius: height / 2
+            color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.08)
+            border.color: Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18)
+            border.width: 1
+            anchors.verticalCenter: parent.verticalCenter
+
+            Row {
+              id: transportRow
+              anchors.centerIn: parent
+              spacing: Style.space(1)
+              Button {
+                text: root.isRunning ? "Pause" : (root.isPaused ? "Resume" : "Start")
+                foreground: Color.accent
+                selected: true
+                radius: height / 2
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                onClicked: root.ff.toggleTimer()
+              }
+              Button {
+                text: "Reset"
+                foreground: root.dimText
+                radius: height / 2
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                onClicked: root.ff.resetTimer()
+              }
+              Button {
+                text: "Skip"
+                foreground: root.dimText
+                radius: height / 2
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                onClicked: root.ff.skipPhase()
+              }
+            }
+          }
+
+          // Segmented List | Board switcher — active side takes accent fill
+          Rectangle {
+            id: viewSegBox
+            width: viewSegRow.implicitWidth + Style.space(6)
+            height: transportBox.height
+            radius: height / 2
+            color: "transparent"
+            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
+            border.width: 1
+            anchors.verticalCenter: parent.verticalCenter
+
+            Row {
+              id: viewSegRow
+              anchors.centerIn: parent
+              spacing: 0
+              Button {
+                text: "List"
+                foreground: root.kanbanMode ? root.dimText : Color.accent
+                selected: !root.kanbanMode
+                radius: height / 2
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                onClicked: root.setKanbanMode(false)
+              }
+              Button {
+                text: "Board"
+                foreground: root.kanbanMode ? Color.accent : root.dimText
+                selected: root.kanbanMode
+                radius: height / 2
+                fontSize: Style.font.caption
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                onClicked: root.setKanbanMode(true)
+              }
+            }
+          }
         }
       }
 
@@ -396,6 +436,8 @@ Panel {
 
         PanelSectionHeader { text: "Settings" }
 
+        // ---- Audio group ----
+        Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
         // Sound row — always 2-across even on 340px (166px each) to halve height
         Grid {
           width: parent.width
@@ -438,16 +480,20 @@ Panel {
               spacing: Style.spacing.controlPaddingX
               Text { text: "Tick vol"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
               PanelSlider { bar: root.bar; minimum: 0; maximum: 1; step: 0.05; value: root.ffSettings.tickVolume; onMoved: function(v){ root.ff.state.settings.tickVolume = v; root.ff.saveState() } ; onReleased: function(v){ root.ff.state.settings.tickVolume = v; root.ff.saveState(); root.ff.applyTickState() }; width: 95 }
+              Text { text: Math.round((root.ffSettings.tickVolume || 0) * 100) + "%"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 32 }
             }
             Row {
               visible: root.ffSettings.alarmEnabled !== false
               spacing: Style.spacing.controlPaddingX
               Text { text: "Alarm vol"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 52 }
               PanelSlider { bar: root.bar; minimum: 0; maximum: 1; step: 0.05; value: root.ffSettings.alarmVolume; onMoved: function(v){ root.ff.state.settings.alarmVolume = v; root.ff.saveState() }; onReleased: function(v){ root.ff.state.settings.alarmVolume = v; root.ff.saveState(); root.ff.applyTickState() }; width: 95 }
+              Text { text: Math.round((root.ffSettings.alarmVolume || 0) * 100) + "%"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; anchors.verticalCenter: parent.verticalCenter; width: 32 }
             }
           }
         }
 
+        // ---- Board & timing group ----
+        Text { text: "Board & timing"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
         // Board / Pomodoros / Continuous — always 2-across
         Grid {
           width: parent.width
@@ -459,7 +505,7 @@ Panel {
             label: "Kanban board"
             description: "Backlog/To Do/Doing/Done"
             checked: root.kanbanMode
-            onClicked: { root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode; root.ff.saveState(); root.ff.applyTickState() }
+            onClicked: root.setKanbanMode(!root.kanbanMode)
           }
           SmallToggle {
             width: (parent.width - parent.columnSpacing)/2
@@ -508,9 +554,9 @@ Panel {
           }
         }
 
-        // Notes export — Obsidian or any markdown notes app (manual approve)
+        // ---- Vault sync group (notes export) ----
         PanelSeparator {}
-        Text { text: "Notes"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
+        Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true }
         SmallToggle {
           width: parent.width
           label: "Notes export"
@@ -529,44 +575,66 @@ Panel {
             onAccepted: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
             onEditingFinished: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
           }
-          Row {
+          // Path card — resolved destination for the active space + copy.
+          Rectangle {
+            id: pathCard
+            visible: !!root.ffSettings.obsidianVaultPath
             width: parent.width
-            spacing: Style.spacing.controlPaddingX
-            Button {
-              text: "Push all"
-              foreground: Color.accent
-              enabled: (Model.tasksForProfile(root.state, root.activeProfileId).filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length > 0) && !!root.ffSettings.obsidianVaultPath
-              onClicked: root.ff.pushAllDoneToObsidian()
-            }
-            Text {
-              text: {
-                var all = Model.tasksForProfile(root.state, root.activeProfileId)
-                var pending = all.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length
-                var total = all.length
-                var space = root.activeProfile ? root.activeProfile.name : "Default"
-                if (!root.ffSettings.obsidianVaultPath) return "set vault path"
-                if (pending === 0 && total > 0) return "all pushed ✓ · " + space
-                return pending + "/" + total + " pending · " + space
+            height: pathCardRow.implicitHeight + Style.space(12)
+            radius: Style.cornerRadius
+            color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.05)
+            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.20)
+            border.width: 1
+            Row {
+              id: pathCardRow
+              anchors.fill: parent
+              anchors.margins: Style.space(6)
+              spacing: Style.space(6)
+              Text {
+                text: root.vaultDestForActive()
+                color: Color.popups.text
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideMiddle
+                width: parent.width - copyPathBtn.width - parent.spacing
+                anchors.verticalCenter: parent.verticalCenter
               }
-              color: root.dimText
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              anchors.verticalCenter: parent.verticalCenter
-              elide: Text.ElideRight
-              width: parent.width - 110 - parent.spacing
+              Button {
+                id: copyPathBtn
+                text: "Copy"
+                fontSize: Style.font.caption
+                tooltipText: "Copy notes path to clipboard"
+                onClicked: root.copyVaultPath()
+                anchors.verticalCenter: parent.verticalCenter
+              }
             }
           }
-          // Resolved destination for the active space — Default writes the base
-          // file, other spaces write vault/<Space>/file (this is where pushes go).
+          // Sync status for the active space
           Text {
-            visible: !!root.ffSettings.obsidianVaultPath
-            text: "→ " + root.vaultDestForActive()
+            text: {
+              var all = Model.tasksForProfile(root.state, root.activeProfileId)
+              var pending = all.filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length
+              var total = all.length
+              var space = root.activeProfile ? root.activeProfile.name : "Default"
+              if (!root.ffSettings.obsidianVaultPath) return "set vault path"
+              if (pending === 0 && total > 0) return "Synced ✓ · " + space
+              return "Sync status: " + pending + "/" + total + " pending · " + space
+            }
             color: root.dimText
             font.family: Style.font.family
-            font.pixelSize: Style.font.caption - 1
-            opacity: 0.85
-            elide: Text.ElideMiddle
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
             width: parent.width
+          }
+          // Full-width sync action
+          Button {
+            width: parent.width
+            text: "Sync now"
+            foreground: Color.accent
+            selected: true
+            fontSize: Style.font.caption
+            enabled: (Model.tasksForProfile(root.state, root.activeProfileId).filter(function(t){return !t.pushedToObsidian || t.pushedColumn !== t.column}).length > 0) && !!root.ffSettings.obsidianVaultPath
+            onClicked: root.ff.pushAllDoneToObsidian()
           }
         }
 
@@ -990,7 +1058,7 @@ Panel {
             Repeater {
               model: Model.COLUMNS
 
-              delegate: Column {
+              delegate: Item {
                 required property string modelData
                 property string colId: modelData
 
@@ -1000,29 +1068,49 @@ Panel {
                 // (No binding loop: viewport width comes from layout, and
                 // contentWidth only follows implicitWidth one way.)
                 width: Math.max(120, Math.floor((kanbanContainer.width - Style.space(12) * 3) / 4))
-                spacing: Style.space(8)
+                implicitHeight: colInner.implicitHeight + Style.space(12)
+                // Explicit height too: positioners lay out width/height, and
+                // colInner anchors.fill needs a concrete parent height.
+                height: colInner.implicitHeight + Style.space(12)
 
-                // Header with pill count — more breathing room
+                // Shaded column container — theme-safe foreground wash
+                Rectangle {
+                  anchors.fill: parent
+                  radius: Style.cornerRadius
+                  color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.045)
+                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+                  border.width: 1
+                }
+
+                Column {
+                  id: colInner
+                  anchors.fill: parent
+                  anchors.margins: Style.space(6)
+                  spacing: Style.space(8)
+
+                // Header with pill count badge — accent when non-zero
                 Row {
                   width: parent.width
                   spacing: Style.space(4)
                   Text {
-                    text: Model.COLUMN_LABELS[colId]
+                    text: String(Model.COLUMN_LABELS[colId]).toUpperCase()
                     color: root.dimText
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                     font.bold: true
+                    font.letterSpacing: 1
                   }
                   Rectangle {
-                    width: countText.implicitWidth + Style.space(6)
-                    height: Style.space(12)
+                    property int count: Model.tasksByColumn(root.state, colId, root.activeProfileId).length
+                    width: countText.implicitWidth + Style.space(8)
+                    height: Style.space(14)
                     radius: height/2
-                    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+                    color: count > 0 ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.18) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
                     Text {
                       id: countText
                       anchors.centerIn: parent
-                      text: String(Model.tasksByColumn(root.state, colId, root.activeProfileId).length)
-                      color: root.dimText
+                      text: String(parent.count)
+                      color: parent.count > 0 ? Color.accent : root.dimText
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption - 1
                       font.bold: true
@@ -1059,7 +1147,7 @@ Panel {
                     radius: Style.cornerRadius
                     clip: true
                     color: task.id === root.timer.activeTaskId ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 0.04)
-                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
+                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.20)
                     border.width: task.id === root.timer.activeTaskId ? 1.5 : 1
                     HoverHandler { id: kanbanHover; onHoveredChanged: kanbanCard.isHovered = hovered }
 
@@ -1105,16 +1193,41 @@ Panel {
                         }
                       }
 
+                      // Pomodoro mini-widget — tomato + progress toward estimate
                       Row {
-                        spacing: 6
+                        visible: root.ffSettings.showPomodoros !== false
+                        spacing: Style.space(4)
                         anchors.left: parent.left
+                        property int spent: task.pomodorosSpent || 0
+                        property int est: task.pomodorosEstimated || 0
 
                         Text {
-                          visible: root.ffSettings.showPomodoros !== false
-                          text: task.pomodorosSpent + "/" + task.pomodorosEstimated + " 🍅"
+                          text: "🍅"
+                          font.pixelSize: Style.font.caption
+                          anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Item {
+                          width: 56
+                          height: 4
+                          anchors.verticalCenter: parent.verticalCenter
+                          Rectangle {
+                            anchors.fill: parent
+                            radius: 2
+                            color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
+                          }
+                          Rectangle {
+                            height: parent.height
+                            width: parent.width * Math.max(0, Math.min(1, parent.parent.est > 0 ? parent.parent.spent / parent.parent.est : 0))
+                            radius: 2
+                            color: Color.accent
+                          }
+                        }
+                        Text {
+                          text: parent.spent + "/" + parent.est
                           color: root.dimText
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption
+                          anchors.verticalCenter: parent.verticalCenter
                         }
                       }
 
@@ -1257,6 +1370,7 @@ Panel {
               }
             }
           }
+        }
         }
         }
       }
@@ -1503,13 +1617,26 @@ Panel {
 
   // Shortened per-profile vault destination for the active space,
   // e.g. ~/Documents/Obsidian-Vault/sync/focusflow/freelance.md
-  function vaultDestForActive() {
+  // Full (unshortened) per-profile vault destination for the active space
+  function vaultFullDestForActive() {
     var name = root.activeProfile ? root.activeProfile.name : "Default"
-    var p = Model.obsidianFilePathForProfile(root.ffSettings, root.ffSettings.obsidianVaultPath, root.activeProfileId, name)
+    return Model.obsidianFilePathForProfile(root.ffSettings, root.ffSettings.obsidianVaultPath, root.activeProfileId, name) || ""
+  }
+
+  // Shortened for display (~/…).
+  function vaultDestForActive() {
+    var p = vaultFullDestForActive()
     if (!p) return ""
     var home = Quickshell.env("HOME") || ""
     if (home && p.indexOf(home) === 0) p = "~" + p.slice(home.length)
     return p
+  }
+
+  // Copies the resolved notes path for the active space (wl-copy, no shell).
+  function copyVaultPath() {
+    var p = vaultFullDestForActive()
+    if (!p) return
+    Quickshell.execDetached(["wl-copy", "--", p])
   }
 
   function confirmProfileName() {
@@ -1552,7 +1679,12 @@ Panel {
     keyCatcher.forceActiveFocus()
   }
   function switchPanel(direction) {
-    root.ff.state.settings.kanbanMode = !root.ffSettings.kanbanMode
+    setKanbanMode(!root.ffSettings.kanbanMode)
+  }
+
+  function setKanbanMode(v) {
+    if (!root.ff) return
+    root.ff.state.settings.kanbanMode = v
     root.ff.saveState()
     root.ff.applyTickState()
   }
