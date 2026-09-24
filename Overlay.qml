@@ -80,6 +80,9 @@ Item {
     Quickshell.execDetached(["qs", "ipc", "-n", "-p", root.shellPath, "call", "flowfocus", "mutate", json])
   }
 
+  // True while typing in any overlay input — letter shortcuts stay off
+  readonly property bool typing: boardSearch.activeFocus || addBox.activeFocus || notesPath.activeFocus
+
   function taskMatches(task) {
     var q = root.searchText.trim().toLowerCase()
     if (!q || !task) return true
@@ -140,35 +143,65 @@ Item {
       }
     }
 
-    // Keyboard
+    // Keyboard — letter keys stay off while typing in search/add/path fields
     Item {
       id: keyGrab
       anchors.fill: parent
       focus: root.opened
       Keys.onEscapePressed: root.close()
-      Keys.onSpacePressed: function(event) { root.call("toggle"); event.accepted = true }
+      Keys.onSpacePressed: function(event) { if (root.typing) return; root.call("toggle"); event.accepted = true }
       Shortcut {
         sequence: "Tab"
         context: Qt.WindowShortcut
-        enabled: root.opened
+        enabled: root.opened && !root.typing
         onActivated: root.cycleView(1)
       }
       Shortcut {
         sequence: "M"
         context: Qt.WindowShortcut
-        enabled: root.opened
+        enabled: root.opened && !root.typing
         onActivated: root.call("mute")
+      }
+      Shortcut {
+        sequence: "m"
+        context: Qt.WindowShortcut
+        enabled: root.opened && !root.typing
+        onActivated: root.call("mute")
+      }
+      Shortcut {
+        sequence: "f"
+        context: Qt.WindowShortcut
+        enabled: root.opened && !root.typing
+        onActivated: root.view = "focus"
+      }
+      Shortcut {
+        sequence: "k"
+        context: Qt.WindowShortcut
+        enabled: root.opened && !root.typing
+        onActivated: root.view = "kanban"
+      }
+      Shortcut {
+        sequence: "t"
+        context: Qt.WindowShortcut
+        enabled: root.opened && !root.typing
+        onActivated: root.view = "todo"
+      }
+      Shortcut {
+        sequence: "s"
+        context: Qt.WindowShortcut
+        enabled: root.opened && !root.typing
+        onActivated: root.view = "settings"
       }
       Shortcut {
         sequence: "Alt+H"
         context: Qt.ApplicationShortcut
-        enabled: root.opened
+        enabled: root.opened && !root.typing
         onActivated: root.call("cycleProfile", { dir: -1 })
       }
       Shortcut {
         sequence: "Alt+L"
         context: Qt.ApplicationShortcut
-        enabled: root.opened
+        enabled: root.opened && !root.typing
         onActivated: root.call("cycleProfile", { dir: 1 })
       }
     }
@@ -244,13 +277,15 @@ Item {
       }
     }
 
-    // Centered workspace card
+    // Compact workspace card — floats above the bar, not fullscreen-center
     Rectangle {
       id: card
       visible: root.opened
-      width: Math.min(parent.width - 80, 1240)
-      height: Math.min(parent.height - 80, 800)
-      anchors.centerIn: parent
+      width: Math.min(parent.width - 80, 980)
+      height: Math.min(parent.height - 140, 620)
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: 56
       radius: Style.cornerRadius
       color: Color.background
       border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
@@ -1083,23 +1118,42 @@ Item {
                 width: parent.width
                 spacing: Style.space(8)
                 Text { text: "Pomodoro"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
-                OvStepper { width: parent.width; label: "Work duration"; value: Math.round((root.ovSettings.workSec || 1500) / 60) + "m"; onDecrease: root.stepDuration("workSec", -1, 1, 60); onIncrease: root.stepDuration("workSec", 1, 1, 60) }
-                OvStepper { width: parent.width; label: "Short break"; value: Math.round((root.ovSettings.shortBreakSec || 300) / 60) + "m"; onDecrease: root.stepDuration("shortBreakSec", -1, 1, 25); onIncrease: root.stepDuration("shortBreakSec", 1, 1, 25) }
-                OvStepper { width: parent.width; label: "Long break"; value: Math.round((root.ovSettings.longBreakSec || 900) / 60) + "m"; onDecrease: root.stepDuration("longBreakSec", -1, 1, 60); onIncrease: root.stepDuration("longBreakSec", 1, 1, 60) }
-                OvStepper { width: parent.width; label: "Long break every"; value: String(root.ovSettings.longBreakInterval || 4); onDecrease: root.stepDuration("longBreakInterval", -1, 1, 12); onIncrease: root.stepDuration("longBreakInterval", 1, 1, 12) }
-                OvToggle { width: parent.width; label: "Auto-start"; description: "Breaks + work chained"; checked: root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork; onClicked: { var v = !(root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork); root.call("set", { key: "autoStartBreaks", value: v }); root.call("set", { key: "autoStartWork", value: v }) } }
+                Grid {
+                  width: parent.width
+                  columns: 2
+                  columnSpacing: Style.space(12)
+                  rowSpacing: Style.space(4)
+                  OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Work duration"; value: Math.round((root.ovSettings.workSec || 1500) / 60) + "m"; onDecrease: root.stepDuration("workSec", -1, 1, 60); onIncrease: root.stepDuration("workSec", 1, 1, 60) }
+                  OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Short break"; value: Math.round((root.ovSettings.shortBreakSec || 300) / 60) + "m"; onDecrease: root.stepDuration("shortBreakSec", -1, 1, 25); onIncrease: root.stepDuration("shortBreakSec", 1, 1, 25) }
+                  OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Long break"; value: Math.round((root.ovSettings.longBreakSec || 900) / 60) + "m"; onDecrease: root.stepDuration("longBreakSec", -1, 1, 60); onIncrease: root.stepDuration("longBreakSec", 1, 1, 60) }
+                  OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Long break every"; value: String(root.ovSettings.longBreakInterval || 4); onDecrease: root.stepDuration("longBreakInterval", -1, 1, 12); onIncrease: root.stepDuration("longBreakInterval", 1, 1, 12) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Auto-start"; description: "Breaks + work chained"; checked: root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork; onClicked: { var v = !(root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork); root.call("set", { key: "autoStartBreaks", value: v }); root.call("set", { key: "autoStartWork", value: v }) } }
+                }
                 Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
-                OvToggle { width: parent.width; label: "Tick sound"; description: "Tick every second"; checked: root.ovSettings.tickEnabled === true; onClicked: root.call("set", { key: "tickEnabled", value: !(root.ovSettings.tickEnabled === true) }) }
-                OvToggle { width: parent.width; label: "Alarm sound"; description: "Chime on phase end"; checked: root.ovSettings.alarmEnabled !== false; onClicked: root.call("set", { key: "alarmEnabled", value: !(root.ovSettings.alarmEnabled !== false) }) }
-                OvToggle { width: parent.width; label: "Mute all"; description: "Bell / M key"; checked: root.ovSettings.soundMuted === true; onClicked: root.call("mute") }
-                OvStepper { width: parent.width; label: "Tick volume"; value: Math.round((root.ovSettings.tickVolume ?? 0.3) * 100) + "%"; onDecrease: root.stepVolume("tickVolume", -0.05); onIncrease: root.stepVolume("tickVolume", 0.05) }
-                OvStepper { width: parent.width; label: "Alarm volume"; value: Math.round((root.ovSettings.alarmVolume ?? 0.5) * 100) + "%"; onDecrease: root.stepVolume("alarmVolume", -0.05); onIncrease: root.stepVolume("alarmVolume", 0.05) }
+                Grid {
+                  width: parent.width
+                  columns: 2
+                  columnSpacing: Style.space(12)
+                  rowSpacing: Style.space(4)
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Tick sound"; description: "Tick every second"; checked: root.ovSettings.tickEnabled === true; onClicked: root.call("set", { key: "tickEnabled", value: !(root.ovSettings.tickEnabled === true) }) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Alarm sound"; description: "Chime on phase end"; checked: root.ovSettings.alarmEnabled !== false; onClicked: root.call("set", { key: "alarmEnabled", value: !(root.ovSettings.alarmEnabled !== false) }) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Mute all"; description: "Bell / M key"; checked: root.ovSettings.soundMuted === true; onClicked: root.call("mute") }
+                  OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Tick volume"; value: Math.round((root.ovSettings.tickVolume ?? 0.3) * 100) + "%"; onDecrease: root.stepVolume("tickVolume", -0.05); onIncrease: root.stepVolume("tickVolume", 0.05) }
+                  OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Alarm volume"; value: Math.round((root.ovSettings.alarmVolume ?? 0.5) * 100) + "%"; onDecrease: root.stepVolume("alarmVolume", -0.05); onIncrease: root.stepVolume("alarmVolume", 0.05) }
+                }
                 Text { text: "Board"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
-                OvToggle { width: parent.width; label: "Show pomodoros"; description: "🍅 on cards"; checked: root.ovSettings.showPomodoros !== false; onClicked: root.call("set", { key: "showPomodoros", value: !(root.ovSettings.showPomodoros !== false) }) }
-                OvToggle { width: parent.width; label: "Notifications"; description: "Desktop on phase end"; checked: root.ovSettings.notificationsEnabled !== false; onClicked: root.call("set", { key: "notificationsEnabled", value: !(root.ovSettings.notificationsEnabled !== false) }) }
+                Grid {
+                  width: parent.width
+                  columns: 2
+                  columnSpacing: Style.space(12)
+                  rowSpacing: Style.space(4)
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Show pomodoros"; description: "🍅 on cards"; checked: root.ovSettings.showPomodoros !== false; onClicked: root.call("set", { key: "showPomodoros", value: !(root.ovSettings.showPomodoros !== false) }) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Notifications"; description: "Desktop on phase end"; checked: root.ovSettings.notificationsEnabled !== false; onClicked: root.call("set", { key: "notificationsEnabled", value: !(root.ovSettings.notificationsEnabled !== false) }) }
+                }
                 Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.caption; font.bold: true; font.letterSpacing: 1 }
                 OvToggle { width: parent.width; label: "Notes export"; description: root.ovSettings.obsidianEnabled ? (root.ovSettings.obsidianVaultPath || "no path set") : "Obsidian / any notes app, on approve"; checked: root.ovSettings.obsidianEnabled === true; onClicked: root.call("set", { key: "obsidianEnabled", value: !(root.ovSettings.obsidianEnabled === true) }) }
                 TextField {
+                  id: notesPath
                   width: parent.width
                   visible: root.ovSettings.obsidianEnabled === true
                   placeholderText: "Notes folder e.g. ~/Documents/notes"
