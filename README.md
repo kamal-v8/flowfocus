@@ -1,15 +1,17 @@
 # FocusFlow
 
-Pomodoro timer + To-Do (plain / Kanban) for [Omarchy](https://omarchy.org) — single bar widget, rich popup, minimal resource footprint. Hover shows **FocusFlow**.
+Pomodoro timer + To-Do / Kanban for [Omarchy](https://omarchy.org) — bar widget with quick popup plus a fullscreen workspace overlay (rail + timer + board). Hover shows **FocusFlow**.
 
 ![FocusFlow Preview](assets/preview.png)
+
+![FocusFlow Focus view](assets/focus.png)
 
 * **Pomodoro cycle** — Work / Short break / Long break (default `25/5/15` min, every 4 cycles), pause/resume/reset/skip, cycle counter, deadline-based math survives bar reloads. Single `1000ms` tick timer; ticks muted 30s during alarm to avoid overlap in continuous mode.
 * **Sound (lightweight)** — `tick.ogg` (5.3K mono 22k) + `alarm.ogg` (142K mono 22k) + fallback `tick.wav/alarm.wav` mono 22k — was `5.6M` WAV. Played via `pw-play --volume || paplay` with path sanitization (`..` rejected). `tick` every second when enabled, `alarm` once on phase end. Volume sliders now `save+apply` on release.
 * **To-Do** — plain list or Kanban (adaptive columns fill the `520px` board, per-column vertical scroll). Plain: custom `18×18` checkbox. Hover pill holds `→ ▲ ▼ ⬆ −`. `Space` start/pause when panel focused.
 * **Notes export (Obsidian or any markdown app)** — optional manual export per kanban profile. Plain Markdown, no Obsidian-only syntax, so Obsidian, Logseq, or any text app can read it. Everything lives under `<folder>/focusflow/`, one file per space: `focusflow/Default.md`, `focusflow/<Space>.md`, … Task → `- [ ] task [To Do] — YYYY-MM-DD HH:MM <!-- id -->` (or `[x]` if `Done`). Idempotent `grep -v <!-- id -->`, `⬆`→`↩` undo removes line, `Push all` per active profile, delete-task also removes from notes. Old locations (`FlowFocus.md`, per-space subfolders) auto-migrate on first write.
 * **Kanban profiles** — `Default` + up to 20 custom spaces (`Kanban — <Space>` heading). `Spaces:` pill tabs + `+` creator, `Rename`/`Delete` (with `Yes/No` confirm). Switch via click or `Alt+H` / `Alt+L` when FocusFlow focused. Each profile isolated tasks, vault files, and counts.
-* **Bar** — idle `` only; running ring + `MM:SS` (`accent` work, dimmed break, `urgent` long break). `SUPER + SHIFT + T` toggles popup.
+* **Bar** — idle `` only; running ring + `MM:SS` (`accent` work, dimmed break, `urgent` long break). Click or `SUPER + SHIFT + T` toggles the workspace overlay.
 * **Compact UI** — `SmallToggle` `32px` 2-col grid, `PanelSlider 95px`, timing side-by-side, vault inline, per-column `Flickable` scroll, capped heights, no `ScrollBar` chrome, left accent `3px` + `●` for active task, `-` delete at top-right `z:10`.
 
 ## Install
@@ -86,7 +88,9 @@ qs ipc -n -p "$OMARCHY_PATH/shell" call flowfocus {start,pause,resume,toggle,res
 ```
 
 ## Security
-* `Model.sanitizePluginDir` blocks `..`; `sanitizeVaultPath` blocks `..`/`;`/`&`/`|`/`$`/`\``/`*`/`?`/`<>`/`^()`/`{}`/`[]`/`\`/`'`/`"`/control chars, 500 chars + `sanitizeProfileNameForPath` for `focusflow/<Space>.md` paths. Task text `trim` 200, `\\`/`"`/`$`/`` ` `` escaped before `bash -c` `printf`. Task `column`/`profileId` whitelisted, `done`/`pushed` bool-coerced. All writes `FileView atomicWrites`. `ConfirmDialog` Yes/No for delete task/profile + vault sync.
+* External binaries resolve to absolute trusted identities only (`/usr/bin/bash`, `/usr/bin/pw-play`, `/usr/bin/paplay`, `/usr/bin/pkill`, `/usr/bin/notify-send`, `/usr/bin/grep|mv|rm|mkdir|touch|rmdir|dirname|stat|id|mktemp`) — nothing via ambient `PATH` (scripts pin `PATH=/usr/bin:/bin`). Shell is used only for the player fallback chain and vault pipelines; `pkill` runs as a fixed argv.
+* Vault writes never truncate the target directly: filter + append land in a same-directory `mktemp` O_EXCL temp, atomically renamed over a verified non-symlink. Reads are bounded (regular file, owned by euid, ≤1MiB); symlink targets are refused silently. Task ids are shell-restricted to `[A-Za-z0-9_-]`.
+* `Model.sanitizePluginDir` blocks `..`; `sanitizeVaultPath` blocks `..`/`;`/`&`/`|`/`$`/`\``/`*`/`?`/`<>`/`^()`/`{}`/`[]`/`\`/`'`/`"`/control chars, 500 chars + `sanitizeProfileNameForPath` for `focusflow/<Space>.md` paths. Task text `trim` 200, `\\`/`"`/`$`/`` ` `` escaped before `bash -c` `printf`. Task `column`/`profileId` whitelisted, `done`/`pushed` bool-coerced. State writes go through strict `parseOrNull` adoption. `ConfirmDialog` Yes/No for delete task/profile + vault sync.
 
 ## Development
 ```bash

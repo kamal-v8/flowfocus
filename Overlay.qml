@@ -562,16 +562,7 @@ Item {
                 }
               }
             }
-            Item { width: 64; height: Math.max(0, parent.height - railRep.count * 48 - parent.spacing * 4 - syncDot.height - parent.spacing) }
-            Text {
-              id: syncDot
-              width: 64
-              horizontalAlignment: Text.AlignHCenter
-              text: "●"
-              color: !root.ovSettings.obsidianEnabled ? root.dimText : (root.profilePendingPush > 0 ? Color.accent : Color.accent)
-              font.pixelSize: Style.font.caption
-              opacity: (!root.ovSettings.obsidianEnabled || root.profilePendingPush === 0) ? 0.45 : 1.0
-            }
+            Item { width: 64; height: Math.max(0, parent.height - railRep.count * 48 - parent.spacing * 4) }
           }
 
           // Main region — views land here
@@ -876,6 +867,7 @@ Item {
                 spacing: Style.space(8)
                 Button {
                   text: "Kanban"
+                  id: kanbanTab
                   visible: root.viewEnabled("kanban")
                   foreground: root.view === "kanban" ? Color.accent : root.dimText
                   selected: root.view === "kanban"
@@ -885,6 +877,7 @@ Item {
                 }
                 Button {
                   text: "To-Do"
+                  id: todoTab
                   visible: root.viewEnabled("todo")
                   foreground: root.view === "todo" ? Color.accent : root.dimText
                   selected: root.view === "todo"
@@ -892,37 +885,34 @@ Item {
                   onClicked: root.setView("todo")
                   anchors.verticalCenter: parent.verticalCenter
                 }
-                Text {
-                  text: "+"
-                  color: Color.accent
-                  font.pixelSize: Style.font.body
-                  font.bold: true
-                  anchors.verticalCenter: parent.verticalCenter
-                }
                 TextField {
                   id: addBox
                   width: 220
-                  placeholderText: "Add a task…"
+                  placeholderText: "Add a task… (+ Add submits)"
                   text: root.newTaskText
                   maximumLength: 200
                   onTextChanged: root.newTaskText = text.slice(0, 200)
                   onAccepted: { root.addTask(root.newTaskText, "todo"); root.newTaskText = "" }
                 }
                 Text {
+                  id: searchIcon
                   text: "🔍"
                   font.pixelSize: Style.font.bodySmall
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 TextField {
                   id: boardSearch
-                  width: Math.max(140, parent.width - 400)
+                  width: Math.max(120, parent.width
+                    - (kanbanTab.visible ? kanbanTab.width : 0)
+                    - (todoTab.visible ? todoTab.width : 0)
+                    - addBox.width - addBtn.width - searchIcon.width - parent.spacing * 5)
                   placeholderText: "Search tasks…"
                   text: root.searchText
                   maximumLength: 100
                   onTextChanged: root.searchText = text.slice(0, 100)
                 }
-                Item { width: Math.max(0, parent.width - 400 - boardSearch.width - addBox.width - parent.spacing * 3); height: 1 }
                 Button {
+                  id: addBtn
                   text: "+ Add Task"
                   foreground: Color.accent
                   selected: true

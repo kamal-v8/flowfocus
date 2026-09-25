@@ -546,16 +546,31 @@ function removeTaskFromVault(pluginDir, settings, task, vaultPath, profileName) 
   var legacy = obsidianLegacyFile(settings, vp, pid, pName)
   if (legacy && legacy !== files[0]) files.push(legacy)
   var idTag = "<!-- " + task.id + " -->"
-  var escId = idTag.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  var cmd = ""
+  // Shell-safe id for grep matching (genId output is already in this class).
+  var safeId = String(task.id).replace(/[^A-Za-z0-9_-]/g, "")
+  var escId = safeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var cmd = SH_PREAMBLE
+  var parts = []
   for (var i = 0; i < files.length; i++) {
     if (!files[i]) continue
-    var escFile = files[i].replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-    if (i > 0) cmd += "; "
-    cmd += "if [ -e \"" + escFile + "\" ]; then grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\"; fi"
+    var escFile = shDQ(files[i])
+    // Per-file guarded rewrite through an O_EXCL temp + atomic rename:
+    // never follows symlinks, never truncates the target directly, reads are
+    // bounded (regular file, owned by euid, <= 1MiB).
+    parts.push(
+      "F=\"" + escFile + "\"; D=\"$(" + BIN_DIRNAME + " -- \"$F\")\"; "
+      + "if [ -f \"$F\" ] && [ ! -L \"$F\" ]; then "
+      + "O=\"$(" + BIN_STAT + " -c %u -- \"$F\")\"; S=\"$(" + BIN_STAT + " -c %s -- \"$F\")\"; "
+      + "if [ \"$O\" = \"$(" + BIN_ID + " -u)\" ] && [ \"$S\" -le " + VAULT_MAX_BYTES + " ]; then "
+      + "T=\"$(" + BIN_MKTEMP + " -- \"$D/.ff.XXXXXX\")\"; "
+      + "if [ -n \"$T\" ]; then "
+      + BIN_GREP + " -v -F -- \"" + escId + "\" \"$F\" > \"$T\" || true; "
+      + "if [ -L \"$F\" ]; then " + BIN_RM + " -f -- \"$T\"; else " + BIN_MV + " -f -- \"$T\" \"$F\"; fi; "
+      + "fi; fi; fi"
+    )
   }
-  if (!cmd) return false
-  Quickshell.execDetached(["bash", "-c", cmd])
+  if (parts.length === 0) return false
+  Quickshell.execDetached([BIN_BASH, "-c", cmd + parts.join("; ")])
   return true
 }
 
@@ -586,6 +601,33 @@ function sanitizePluginDir(dir) {
   return dir
 }
 
+// Marketplace supply-chain rules: every external binary is an absolute
+// trusted identity — nothing resolves via ambient PATH. Shell is used only
+// where fallback chains require it, with PATH pinned inside the script.
+var BIN_BASH = "/usr/bin/bash"
+var BIN_PW_PLAY = "/usr/bin/pw-play"
+var BIN_PAPLAY = "/usr/bin/paplay"
+var BIN_PKILL = "/usr/bin/pkill"
+var BIN_NOTIFY_SEND = "/usr/bin/notify-send"
+var BIN_GREP = "/usr/bin/grep"
+var BIN_MV = "/usr/bin/mv"
+var BIN_RM = "/usr/bin/rm"
+var BIN_MKDIR = "/usr/bin/mkdir"
+var BIN_TOUCH = "/usr/bin/touch"
+var BIN_RMDIR = "/usr/bin/rmdir"
+var BIN_DIRNAME = "/usr/bin/dirname"
+var BIN_STAT = "/usr/bin/stat"
+var BIN_ID = "/usr/bin/id"
+var BIN_MKTEMP = "/usr/bin/mktemp"
+var SH_PREAMBLE = "PATH=/usr/bin:/bin; "
+var VAULT_MAX_BYTES = 1048576
+
+// Double-quote escaping for embedding a path inside a bash "..." string.
+// Paths reaching here are already sanitized (no shell metachars allowed).
+function shDQ(s) {
+  return String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+}
+
 function tickSoundPath(pluginDir) {
   var safe = sanitizePluginDir(pluginDir)
   if (!safe) return ""
@@ -610,14 +652,24 @@ function alarmWavPath(pluginDir) {
   return safe + "/sounds/alarm.wav"
 }
 
+function playSoundFile(primary, fallback, vol, paplayVol) {
+  // Absolute player identities; single bash invocation only for the
+  // ogg -> wav -> paplay fallback chain (fire-and-forget has no status).
+  var q = function(s) { return '"' + shDQ(s) + '"' }
+  var cmd = SH_PREAMBLE + BIN_PW_PLAY + " --volume " + String(vol) + " " + q(primary)
+    + " 2>/dev/null || " + BIN_PW_PLAY + " --volume " + String(vol) + " " + q(fallback)
+    + " 2>/dev/null || " + BIN_PAPLAY + " --volume " + paplayVol + " " + q(primary)
+    + " 2>/dev/null || true"
+  Quickshell.execDetached([BIN_BASH, "-c", cmd])
+}
+
 function playTick(pluginDir, volume) {
   var vol = Math.max(0, Math.min(1, Number(volume) || 0))
   if (vol <= 0) return
   var p = tickSoundPath(pluginDir)
   var fallback = tickWavPath(pluginDir)
   if (!p) return
-  // try ogg then wav (pw-play handles both, paplay fallback for pulse)
-  Quickshell.execDetached(["bash", "-c", "pw-play --volume " + String(vol) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || pw-play --volume " + String(vol) + " \"" + fallback.replace(/"/g, '\\"') + "\" 2>/dev/null || paplay --volume " + Math.round(vol*65536) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || true"])
+  playSoundFile(p, fallback, vol, Math.round(vol * 65536))
 }
 
 function playCompleteSound(pluginDir, volume) {
@@ -626,7 +678,7 @@ function playCompleteSound(pluginDir, volume) {
   var p = alarmSoundPath(pluginDir)
   var fallback = alarmWavPath(pluginDir)
   if (!p) return
-  Quickshell.execDetached(["bash", "-c", "pw-play --volume " + String(vol) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || pw-play --volume " + String(vol) + " \"" + fallback.replace(/"/g, '\\"') + "\" 2>/dev/null || paplay --volume " + Math.round(vol*65536) + " \"" + p.replace(/"/g, '\\"') + "\" 2>/dev/null || true"])
+  playSoundFile(p, fallback, vol, Math.round(vol * 65536))
 }
 
 function stopAllSounds(pluginDir) {
@@ -636,14 +688,15 @@ function stopAllSounds(pluginDir) {
   if (!safe) return
   var base = safe.split("/").pop() || "flowfocus"
   var pattern = base.replace(/[^a-zA-Z0-9_-]/g, "_") + "/sounds"
-  Quickshell.execDetached(["bash", "-c", "pkill -f \"" + pattern + "\" 2>/dev/null || true"])
+  // No shell needed: fixed argv, sanitized pattern.
+  Quickshell.execDetached([BIN_PKILL, "-f", pattern])
 }
 
 function notificationArgs(headline, body) {
   // Prefer the Omarchy notifier; fall back to plain notify-send when
   // OMARCHY_PATH is unset so notifications still work on any setup.
   var omarchyPath = Quickshell.env("OMARCHY_PATH") || ""
-  var bin = omarchyPath ? omarchyPath + "/bin/omarchy-notification-send" : "notify-send"
+  var bin = omarchyPath ? omarchyPath + "/bin/omarchy-notification-send" : BIN_NOTIFY_SEND
   var args = [bin, "--app-name", "FocusFlow"]
   if (headline) args.push(headline)
   if (body) args.push(body)
@@ -730,23 +783,28 @@ function migrationSnippet(settings, vpExpanded, profileId, profileName) {
   // the new file doesn't exist yet, so we never clobber or duplicate content.
   // Returned as shell code so callers run it in the SAME bash invocation as
   // their write (two execDetached calls could race each other).
+  // Hardened: absolute binaries, symlink refusal, owner + size bounds.
   var pid = String(profileId || "default")
   var file = obsidianFilePathForProfile(settings, vpExpanded, pid, profileName)
   if (!file) return { file: "", prefix: "" }
   var legacy = obsidianLegacyFile(settings, vpExpanded, pid, profileName)
   if (!legacy || legacy === file) return { file: file, prefix: "" }
-  var escFile = file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  var escLegacy = legacy.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  var prefix = "if [ ! -e \"" + escFile + "\" ] && [ -e \"" + escLegacy + "\" ]; then "
-      + "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && mv \"" + escLegacy + "\" \"" + escFile + "\"; "
-      + "rmdir \"$(dirname -- \"" + escLegacy + "\")\" 2>/dev/null || true; fi; "
+  var escFile = shDQ(file)
+  var escLegacy = shDQ(legacy)
+  var prefix = SH_PREAMBLE
+      + BIN_MKDIR + " -p -- \"$(" + BIN_DIRNAME + " -- \"" + escFile + "\")\"; "
+      + "if [ ! -e \"" + escFile + "\" ] && [ -f \"" + escLegacy + "\" ] && [ ! -L \"" + escLegacy + "\" ] && [ ! -L \"" + escFile + "\" ]; then "
+      + "LO=\"$(" + BIN_STAT + " -c %u -- \"" + escLegacy + "\")\"; LS=\"$(" + BIN_STAT + " -c %s -- \"" + escLegacy + "\")\"; "
+      + "if [ \"$LO\" = \"$(" + BIN_ID + " -u)\" ] && [ \"$LS\" -le " + VAULT_MAX_BYTES + " ]; then "
+      + BIN_MV + " -f -- \"" + escLegacy + "\" \"" + escFile + "\"; fi; "
+      + BIN_RMDIR + " \"$(" + BIN_DIRNAME + " -- \"" + escLegacy + "\")\" 2>/dev/null || true; fi; "
   return { file: file, prefix: prefix }
 }
 
 function migrateProfileVaultFile(settings, vpExpanded, profileId, profileName) {
   var r = migrationSnippet(settings, vpExpanded, profileId, profileName)
   if (!r.file) return ""
-  if (r.prefix) Quickshell.execDetached(["bash", "-c", r.prefix + "true"])
+  if (r.prefix) Quickshell.execDetached([BIN_BASH, "-c", r.prefix + "true"])
   return r.file
 }
 
@@ -769,16 +827,29 @@ function appendTaskToVault(pluginDir, settings, task, vaultPath, profileName) {
   var label = COLUMN_LABELS[col] || col
   var isDone = task.done === true || col === "done"
   var idTag = "<!-- " + task.id + " -->"
+  var safeId = String(task.id).replace(/[^A-Za-z0-9_-]/g, "")
   var line = "- [" + (isDone ? "x" : " ") + "] " + text + " [" + label + "] — " + date + " " + time + " " + idTag
-  var escFile = mig.file.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  var escFile = shDQ(mig.file)
   var escLine = line.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`")
-  var escId = idTag.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
-  // single bash invocation: migrate first, then idempotent append (no race)
+  var escId = safeId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+  // Single bash invocation: migrate first, then idempotent append (no race).
+  // The target is never truncated directly: filter + append land in an
+  // O_EXCL same-directory temp that is atomically renamed over a
+  // non-symlink target; reads are bounded (owned, <= 1MiB).
   var cmd = mig.prefix
-      + "mkdir -p \"$(dirname -- \"" + escFile + "\")\" && touch \"" + escFile + "\" && "
-      + "grep -v -F \"" + escId + "\" \"" + escFile + "\" > \"" + escFile + ".tmp\" && mv \"" + escFile + ".tmp\" \"" + escFile + "\"; "
-      + "printf '%s\\n' \"" + escLine + "\" >> \"" + escFile + "\""
-  Quickshell.execDetached(["bash", "-c", cmd])
+      + "F=\"" + escFile + "\"; D=\"$(" + BIN_DIRNAME + " -- \"$F\")\"; "
+      + BIN_MKDIR + " -p -- \"$D\"; "
+      + "if [ -L \"$F\" ]; then :; else "
+      + "T=\"$(" + BIN_MKTEMP + " -- \"$D/.ff.XXXXXX\")\"; "
+      + "if [ -n \"$T\" ]; then "
+      + "if [ -f \"$F\" ] && [ ! -L \"$F\" ]; then "
+      + "O=\"$(" + BIN_STAT + " -c %u -- \"$F\")\"; S=\"$(" + BIN_STAT + " -c %s -- \"$F\")\"; "
+      + "if [ \"$O\" = \"$(" + BIN_ID + " -u)\" ] && [ \"$S\" -le " + VAULT_MAX_BYTES + " ]; then "
+      + BIN_GREP + " -v -F -- \"" + escId + "\" \"$F\" > \"$T\" || true; fi; fi; "
+      + "printf '%s\\n' \"" + escLine + "\" >> \"$T\"; "
+      + "if [ -L \"$F\" ]; then " + BIN_RM + " -f -- \"$T\"; else " + BIN_MV + " -f -- \"$T\" \"$F\"; fi; "
+      + "fi; fi"
+  Quickshell.execDetached([BIN_BASH, "-c", cmd])
   return true
 }
 
