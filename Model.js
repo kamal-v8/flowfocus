@@ -836,16 +836,22 @@ function appendTaskToVault(pluginDir, settings, task, vaultPath, profileName) {
   // The target is never truncated directly: filter + append land in an
   // O_EXCL same-directory temp that is atomically renamed over a
   // non-symlink target; reads are bounded (owned, <= 1MiB).
+  // Crucially, an existing target that FAILS the guards aborts the whole
+  // write (temp discarded) — it must never be replaced by a one-line file.
   var cmd = mig.prefix
       + "F=\"" + escFile + "\"; D=\"$(" + BIN_DIRNAME + " -- \"$F\")\"; "
       + BIN_MKDIR + " -p -- \"$D\"; "
-      + "if [ -L \"$F\" ]; then :; else "
+      + "OK=1; "
+      + "if [ -e \"$F\" ]; then "
+      + "if [ ! -f \"$F\" ] || [ -L \"$F\" ]; then OK=0; else "
+      + "O=\"$(" + BIN_STAT + " -c %u -- \"$F\")\"; S=\"$(" + BIN_STAT + " -c %s -- \"$F\")\"; "
+      + "if [ \"$O\" = \"$(" + BIN_ID + " -u)\" ] && [ \"$S\" -le " + VAULT_MAX_BYTES + " ]; then "
+      + "true; else OK=0; fi; fi; fi; "
+      + "if [ \"$OK\" = 1 ]; then "
       + "T=\"$(" + BIN_MKTEMP + " -- \"$D/.ff.XXXXXX\")\"; "
       + "if [ -n \"$T\" ]; then "
       + "if [ -f \"$F\" ] && [ ! -L \"$F\" ]; then "
-      + "O=\"$(" + BIN_STAT + " -c %u -- \"$F\")\"; S=\"$(" + BIN_STAT + " -c %s -- \"$F\")\"; "
-      + "if [ \"$O\" = \"$(" + BIN_ID + " -u)\" ] && [ \"$S\" -le " + VAULT_MAX_BYTES + " ]; then "
-      + BIN_GREP + " -v -F -- \"" + escId + "\" \"$F\" > \"$T\" || true; fi; fi; "
+      + BIN_GREP + " -v -F -- \"" + escId + "\" \"$F\" > \"$T\" || true; fi; "
       + "printf '%s\\n' \"" + escLine + "\" >> \"$T\"; "
       + "if [ -L \"$F\" ]; then " + BIN_RM + " -f -- \"$T\"; else " + BIN_MV + " -f -- \"$T\" \"$F\"; fi; "
       + "fi; fi"
