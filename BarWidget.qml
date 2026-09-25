@@ -431,6 +431,14 @@ BarWidget {
     if (panelLoader.item) panelLoader.item.toggle()
   }
 
+  // Left-click opens the fullscreen workspace overlay (same as SUPER+T).
+  // The quick popup stays available via `qs ipc ... call flowfocus togglePanel`.
+  function toggleOverlay() {
+    var omarchyPath = Quickshell.env("OMARCHY_PATH") || ""
+    if (!omarchyPath) return
+    Quickshell.execDetached([omarchyPath + "/bin/omarchy-shell", "shell", "toggle", "flowfocus", "{}"])
+  }
+
   function injectPanel() {
     var target = panelLoader.item
     if (!target) return
@@ -564,7 +572,7 @@ BarWidget {
     onPressed: function(b) {
       if (b === Qt.RightButton) root.toggleTimer()
       else if (b === Qt.MiddleButton) root.resetTimer()
-      else root.togglePanel()
+      else root.toggleOverlay()
     }
 
     // Icon + progress ring, centered in the button slot (enlarged)

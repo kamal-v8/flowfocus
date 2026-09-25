@@ -24,7 +24,7 @@ omarchy-shell shell rescanPlugins; omarchy plugin enable flowfocus
 `sounds/*.ogg` are 147K total (was 5.6M). Replace in place and `omarchy restart shell` to use your own.
 
 ## Usage
-* Click → open/close, Right-click → start/pause, Middle → reset, `SUPER+SHIFT+T` → toggle, `Space` (focused) → start/pause
+* Click → workspace overlay, Right-click → start/pause, Middle → reset, `SUPER+SHIFT+T` → overlay toggle, `Space` (focused) → start/pause (`qs ipc … call flowfocus togglePanel` still opens the quick popup)
 * Header: ring + `MM:SS` + phase + `Next: task`. Gear `` collapses compact Settings.
 * Controls: Start/Pause/Reset/Skip, Board↔List, cycle `N — M pomodoros`.
 * Kanban: `← →` move, `−` delete, `⬆` push (→ `↩` undo), `●` active. Plain: `☐` done, `○/●` focus, hover pill holds `→ ▲ ▼ ⬆ −`.
