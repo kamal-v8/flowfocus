@@ -104,29 +104,6 @@ Item {
     root.state = JSON.parse(JSON.stringify(root.state))
   }
 
-  function call(op, args) {
-    var m = args || {}
-    if (op === "toggle") root.toggleTimer()
-    else if (op === "reset") root.resetTimer()
-    else if (op === "skip") root.skipPhase()
-    else if (op === "mute") root.toggleMute()
-    else if (op === "addTask") root.addTask(String(m.text || ""), String(m.column || "todo"))
-    else if (op === "toggleDone") root.toggleTaskDone(String(m.id || ""))
-    else if (op === "setActiveTask") root.setActiveTask(String(m.id || ""))
-    else if (op === "deleteTask") root.deleteTask(String(m.id || ""))
-    else if (op === "archiveTask") root.archiveDoneTask(String(m.id || ""))
-    else if (op === "moveTask") root.moveTask(String(m.id || ""), String(m.column || "todo"))
-    else if (op === "moveUp") root.moveTaskUp(String(m.id || ""))
-    else if (op === "moveDown") root.moveTaskDown(String(m.id || ""))
-    else if (op === "setProfile") root.setActiveProfile(String(m.id || ""))
-    else if (op === "createProfile") root.createProfile(String(m.name || ""))
-    else if (op === "cycleProfile") root.cycleProfile(Number(m.dir) >= 0 ? 1 : -1)
-    else if (op === "pushTask") root.pushTaskToObsidian(String(m.id || ""))
-    else if (op === "undoPush") root.undoPushToObsidian(String(m.id || ""))
-    else if (op === "pushAll") root.pushAllDoneToObsidian()
-    else if (op === "set") root.applySetting(String(m.key || ""), m.value)
-  }
-
   function toggleTimer() {
     if (root.isRunning) root.pauseTimer()
     else if (root.isPaused) root.resumeTimer()
@@ -303,7 +280,7 @@ Item {
   function cycleTaskColumn(task) {
     var cols = Model.COLUMNS
     var idx = cols.indexOf(task.column)
-    root.call("moveTask", { id: task.id, column: cols[(idx + 1) % cols.length] })
+    root.moveTask(task.id, cols[(idx + 1) % cols.length])
   }
 
   function vaultDestForActive() {
@@ -354,13 +331,24 @@ Item {
       }
     }
 
-    // Keyboard — letter keys stay off while typing in search/add/path fields
+    // Keyboard — letter keys handled here (not Shortcut items: layer-shell
+    // windows don't reliably deliver WindowShortcut to embedded Shortcuts).
+    // Typing in search/add/path fields and open dialogs take precedence.
     Item {
       id: keyGrab
       anchors.fill: parent
       focus: root.opened
       Keys.onEscapePressed: root.close()
-      Keys.onSpacePressed: function(event) { if (root.typing) return; root.call("toggle"); event.accepted = true }
+      Keys.onSpacePressed: function(event) { if (root.typing) return; root.toggleTimer(); event.accepted = true }
+      Keys.onPressed: function(event) {
+        if (root.typing || root.delDoneOpen || confirmDeleteTask.opened) return
+        var k = (event.text || "").toLowerCase()
+        if (k === "m") { root.toggleMute(); event.accepted = true }
+        else if (k === "f") { root.setView("focus"); event.accepted = true }
+        else if (k === "k") { root.setView("kanban"); event.accepted = true }
+        else if (k === "t") { root.setView("todo"); event.accepted = true }
+        else if (k === "s") { root.setView("settings"); event.accepted = true }
+      }
       Shortcut {
         sequence: "Tab"
         context: Qt.WindowShortcut
@@ -368,52 +356,16 @@ Item {
         onActivated: root.cycleView(1)
       }
       Shortcut {
-        sequence: "M"
-        context: Qt.WindowShortcut
-        enabled: root.opened && !root.typing
-        onActivated: root.call("mute")
-      }
-      Shortcut {
-        sequence: "m"
-        context: Qt.WindowShortcut
-        enabled: root.opened && !root.typing
-        onActivated: root.call("mute")
-      }
-      Shortcut {
-        sequence: "f"
-        context: Qt.WindowShortcut
-        enabled: root.opened && !root.typing
-        onActivated: root.setView("focus")
-      }
-      Shortcut {
-        sequence: "k"
-        context: Qt.WindowShortcut
-        enabled: root.opened && !root.typing
-        onActivated: root.setView("kanban")
-      }
-      Shortcut {
-        sequence: "t"
-        context: Qt.WindowShortcut
-        enabled: root.opened && !root.typing
-        onActivated: root.setView("todo")
-      }
-      Shortcut {
-        sequence: "s"
-        context: Qt.WindowShortcut
-        enabled: root.opened && !root.typing
-        onActivated: root.setView("settings")
-      }
-      Shortcut {
         sequence: "Alt+H"
         context: Qt.ApplicationShortcut
         enabled: root.opened && !root.typing
-        onActivated: root.call("cycleProfile", { dir: -1 })
+        onActivated: root.cycleProfile(-1)
       }
       Shortcut {
         sequence: "Alt+L"
         context: Qt.ApplicationShortcut
         enabled: root.opened && !root.typing
-        onActivated: root.call("cycleProfile", { dir: 1 })
+        onActivated: root.cycleProfile(1)
       }
     }
 
@@ -425,7 +377,7 @@ Item {
       message: "Delete task \"" + root.delTaskText + "\"? Also removes from notes if pushed. This cannot be undone."
       confirmText: "Delete"
       cancelText: "Cancel"
-      onConfirmed: { if (root.delTaskId) root.call("deleteTask", { id: root.delTaskId }); opened = false; root.delTaskId = ""; root.delTaskText = "" }
+      onConfirmed: { if (root.delTaskId) root.deleteTask(root.delTaskId); opened = false; root.delTaskId = ""; root.delTaskText = "" }
       onCanceled: { opened = false; root.delTaskId = ""; root.delTaskText = "" }
     }
 
@@ -474,13 +426,13 @@ Item {
                 foreground: Color.accent
                 selected: true
                 fontSize: Style.font.caption
-                onClicked: { if (root.delTaskId) root.call("archiveTask", { id: root.delTaskId }); root.closeDeleteDone() }
+                onClicked: { if (root.delTaskId) root.archiveDoneTask(root.delTaskId); root.closeDeleteDone() }
               }
               Button {
                 text: "Delete all"
                 foreground: Color.urgent
                 fontSize: Style.font.caption
-                onClicked: { if (root.delTaskId) root.call("deleteTask", { id: root.delTaskId }); root.closeDeleteDone() }
+                onClicked: { if (root.delTaskId) root.deleteTask(root.delTaskId); root.closeDeleteDone() }
               }
             }
           }
@@ -488,8 +440,9 @@ Item {
       }
     }
 
-    // Compact workspace card — floats above the bar, not fullscreen-center
-    Rectangle {
+    // Compact workspace card — floats above the bar, not fullscreen-center.
+    // BorderSurface + theme border spec so it matches other Omarchy surfaces.
+    BorderSurface {
       id: card
       visible: root.opened
       width: Math.min(parent.width - 80, 980)
@@ -499,8 +452,7 @@ Item {
       anchors.bottomMargin: 56
       radius: Style.cornerRadius
       color: Color.background
-      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.28)
-      border.width: 1
+      borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
       MouseArea { anchors.fill: parent; onClicked: {} }
 
       Column {
@@ -549,15 +501,15 @@ Item {
             text: root.ovSettings.soundMuted ? "\uf1f6" : "\uf0f3"
             foreground: root.ovSettings.soundMuted ? Color.urgent : root.dimText
             tooltipText: "Mute all sound (M)"
-            onClicked: root.call("mute")
+            onClicked: root.toggleMute()
             anchors.verticalCenter: parent.verticalCenter
           }
           Button {
             id: syncBtn
-            text: "●"
+            text: !root.ovSettings.obsidianEnabled ? "Sync off" : (root.profilePendingPush > 0 ? ("Sync · " + root.profilePendingPush) : "Synced ✓")
             fontSize: Style.font.caption
-            foreground: !root.ovSettings.obsidianEnabled ? root.dimText : (root.profilePendingPush > 0 ? Color.accent : root.dimText)
-            tooltipText: !root.ovSettings.obsidianEnabled ? "Notes export off — open Setup" : (root.profilePendingPush > 0 ? (root.profilePendingPush + " pending — open Setup") : "Synced ✓ — open Setup")
+            foreground: (root.ovSettings.obsidianEnabled && root.profilePendingPush > 0) ? Color.accent : root.dimText
+            tooltipText: !root.ovSettings.obsidianEnabled ? "Notes export off — open Setup" : (root.profilePendingPush > 0 ? (root.profilePendingPush + " pending — open Setup to sync") : "All pushed — open Setup")
             onClicked: root.setView("settings")
             anchors.verticalCenter: parent.verticalCenter
           }
@@ -636,13 +588,12 @@ Item {
               spacing: Style.space(8)
 
               // Timer panel
-              Rectangle {
+              BorderSurface {
                 width: Math.round(parent.width * 0.58)
                 height: parent.height
                 radius: Style.cornerRadius
                 color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
-                border.width: 1
+                borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                 Column {
                   anchors.fill: parent
                   anchors.margins: Style.space(12)
@@ -729,7 +680,7 @@ Item {
                       fontSize: Style.font.body
                       horizontalPadding: Style.space(16)
                       verticalPadding: Style.space(6)
-                      onClicked: root.call("toggle")
+                      onClicked: root.toggleTimer()
                     }
                     Button {
                       text: "Skip"
@@ -737,7 +688,7 @@ Item {
                       fontSize: Style.font.body
                       horizontalPadding: Style.space(16)
                       verticalPadding: Style.space(6)
-                      onClicked: root.call("skip")
+                      onClicked: root.skipPhase()
                     }
                   }
                   Row {
@@ -780,13 +731,12 @@ Item {
                 width: parent.width - Math.round(parent.width * 0.58) - parent.spacing
                 height: parent.height
                 spacing: Style.space(8)
-                Rectangle {
+                BorderSurface {
                   width: parent.width
                   height: progBoxCol.implicitHeight + Style.space(20)
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
-                  border.width: 1
+                  borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                   Column {
                     id: progBoxCol
                     anchors.fill: parent
@@ -837,13 +787,12 @@ Item {
                     }
                   }
                 }
-                Rectangle {
+                BorderSurface {
                   width: parent.width
                   height: parent.height - progBoxCol.parent.height - parent.spacing
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.04)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
-                  border.width: 1
+                  borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                   Column {
                     anchors.fill: parent
                     anchors.margins: Style.space(10)
@@ -927,6 +876,7 @@ Item {
                 spacing: Style.space(8)
                 Button {
                   text: "Kanban"
+                  visible: root.viewEnabled("kanban")
                   foreground: root.view === "kanban" ? Color.accent : root.dimText
                   selected: root.view === "kanban"
                   fontSize: Style.font.bodySmall
@@ -935,10 +885,32 @@ Item {
                 }
                 Button {
                   text: "To-Do"
+                  visible: root.viewEnabled("todo")
                   foreground: root.view === "todo" ? Color.accent : root.dimText
                   selected: root.view === "todo"
                   fontSize: Style.font.bodySmall
                   onClicked: root.setView("todo")
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                  text: "+"
+                  color: Color.accent
+                  font.pixelSize: Style.font.body
+                  font.bold: true
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+                TextField {
+                  id: addBox
+                  width: 220
+                  placeholderText: "Add a task…"
+                  text: root.newTaskText
+                  maximumLength: 200
+                  onTextChanged: root.newTaskText = text.slice(0, 200)
+                  onAccepted: { root.addTask(root.newTaskText, "todo"); root.newTaskText = "" }
+                }
+                Text {
+                  text: "🔍"
+                  font.pixelSize: Style.font.bodySmall
                   anchors.verticalCenter: parent.verticalCenter
                 }
                 TextField {
@@ -950,21 +922,12 @@ Item {
                   onTextChanged: root.searchText = text.slice(0, 100)
                 }
                 Item { width: Math.max(0, parent.width - 400 - boardSearch.width - addBox.width - parent.spacing * 3); height: 1 }
-                TextField {
-                  id: addBox
-                  width: 220
-                  placeholderText: "Add a task…"
-                  text: root.newTaskText
-                  maximumLength: 200
-                  onTextChanged: root.newTaskText = text.slice(0, 200)
-                  onAccepted: { root.call("addTask", { text: root.newTaskText, column: "todo" }); root.newTaskText = "" }
-                }
                 Button {
                   text: "+ Add Task"
                   foreground: Color.accent
                   selected: true
                   fontSize: Style.font.bodySmall
-                  onClicked: { root.call("addTask", { text: root.newTaskText, column: "todo" }); root.newTaskText = "" }
+                  onClicked: { root.addTask(root.newTaskText, "todo"); root.newTaskText = "" }
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -990,7 +953,7 @@ Item {
                     foreground: modelData.id === root.activeProfileId ? Color.accent : root.dimText
                     selected: modelData.id === root.activeProfileId
                     fontSize: Style.font.caption
-                    onClicked: root.call("setProfile", { id: modelData.id })
+                    onClicked: root.setActiveProfile(modelData.id)
                     anchors.verticalCenter: parent.verticalCenter
                   }
                 }
@@ -999,7 +962,7 @@ Item {
                   foreground: Color.accent
                   fontSize: Style.font.caption
                   tooltipText: "New space (creates with input text)"
-                  onClicked: { if (root.newTaskText.trim() !== "") { root.call("createProfile", { name: root.newTaskText.trim().slice(0, 30) }); root.newTaskText = "" } }
+                  onClicked: { if (root.newTaskText.trim() !== "") { root.createProfile(root.newTaskText.trim().slice(0, 30)); root.newTaskText = "" } }
                   anchors.verticalCenter: parent.verticalCenter
                 }
               }
@@ -1018,12 +981,11 @@ Item {
                     property var colTasks: Model.tasksByColumn(root.state, colId, root.activeProfileId).filter(root.taskMatches)
                     width: (parent.width - Style.space(8) * 3) / 4
                     height: parent.height
-                    Rectangle {
+                    BorderSurface {
                       anchors.fill: parent
                       radius: Style.cornerRadius
                       color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.045)
-                      border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.32)
-                      border.width: 1
+                      borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                     }
                     Column {
                       anchors.fill: parent
@@ -1074,15 +1036,15 @@ Item {
                           spacing: Style.space(6)
                           Repeater {
                             model: colTasks
-                            delegate: Rectangle {
+                            delegate: BorderSurface {
                               required property var modelData
                               property var task: modelData
                               width: cardsCol.width
                               height: cardInner.implicitHeight + Style.space(10)
                               radius: Style.cornerRadius
+                              clip: true
                               color: task.id === root.timer.activeTaskId ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.12) : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.03)
-                              border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.16)
-                              border.width: 1
+                              borderSpec: task.id === root.timer.activeTaskId ? Border.flat(Color.accent, 1.5) : Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                               Column {
                                 id: cardInner
                                 anchors.fill: parent
@@ -1096,7 +1058,7 @@ Item {
                                     color: task.done ? Color.accent : root.dimText
                                     font.pixelSize: Style.font.body
                                     anchors.verticalCenter: parent.verticalCenter
-                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.call("toggleDone", { id: task.id }) }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.toggleTaskDone(task.id) }
                                   }
                                   Text {
                                     text: task.text
@@ -1149,7 +1111,7 @@ Item {
                                       cursorShape: Qt.PointingHandCursor
                                       onClicked: {
                                         var idx = Model.COLUMNS.indexOf(colId)
-                                        if (idx > 0) root.call("moveTask", { id: task.id, column: Model.COLUMNS[idx - 1] })
+                                        if (idx > 0) root.moveTask(task.id, Model.COLUMNS[idx - 1])
                                       }
                                     }
                                   }
@@ -1166,7 +1128,7 @@ Item {
                                       cursorShape: Qt.PointingHandCursor
                                       onClicked: {
                                         var j = Model.COLUMNS.indexOf(colId)
-                                        if (j < Model.COLUMNS.length - 1) root.call("moveTask", { id: task.id, column: Model.COLUMNS[j + 1] })
+                                        if (j < Model.COLUMNS.length - 1) root.moveTask(task.id, Model.COLUMNS[j + 1])
                                       }
                                     }
                                   }
@@ -1183,8 +1145,8 @@ Item {
                                       cursorShape: Qt.PointingHandCursor
                                       enabled: parent.visible
                                       onClicked: {
-                                        if (task.pushedToObsidian && task.pushedColumn === task.column) root.call("undoPush", { id: task.id })
-                                        else root.call("pushTask", { id: task.id })
+                                        if (task.pushedToObsidian && task.pushedColumn === task.column) root.undoPushToObsidian(task.id)
+                                        else root.pushTaskToObsidian(task.id)
                                       }
                                     }
                                   }
@@ -1193,7 +1155,7 @@ Item {
                                     color: task.id === root.timer.activeTaskId ? Color.accent : root.dimText
                                     font.pixelSize: Style.font.caption
                                     anchors.verticalCenter: parent.verticalCenter
-                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.call("setActiveTask", { id: task.id }) }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.setActiveTask(task.id) }
                                   }
                                 }
                               }
@@ -1209,7 +1171,7 @@ Item {
                         fontSize: Style.font.caption
                         enabled: root.newTaskText.trim() !== ""
                         tooltipText: "Add the top input text to this column"
-                        onClicked: { root.call("addTask", { text: root.newTaskText, column: colId }); root.newTaskText = "" }
+                        onClicked: { root.addTask(root.newTaskText, colId); root.newTaskText = "" }
                       }
                     }
                   }
@@ -1237,7 +1199,7 @@ Item {
                   font.bold: true
                   font.letterSpacing: 1
                 }
-                delegate: Rectangle {
+                delegate: BorderSurface {
                   id: todoDelegate
                   required property var modelData
                   property var task: modelData
@@ -1245,8 +1207,7 @@ Item {
                   height: Math.max(34, todoInner.implicitHeight + Style.space(8))
                   radius: Style.cornerRadius / 2
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.03)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
-                  border.width: 1
+                  borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                   Row {
                     id: todoInner
                     anchors.left: parent.left
@@ -1260,7 +1221,7 @@ Item {
                       color: task.done ? Color.accent : root.dimText
                       font.pixelSize: Style.font.body
                       anchors.verticalCenter: parent.verticalCenter
-                      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.call("toggleDone", { id: task.id }) }
+                      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.toggleTaskDone(task.id) }
                     }
                     Text {
                       text: task.text
@@ -1279,7 +1240,7 @@ Item {
                       color: task.id === root.timer.activeTaskId ? Color.accent : root.dimText
                       font.pixelSize: Style.font.bodySmall
                       anchors.verticalCenter: parent.verticalCenter
-                      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.call("setActiveTask", { id: task.id }) }
+                      MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: root.setActiveTask(task.id) }
                     }
                     Text {
                       id: cycT
@@ -1334,7 +1295,7 @@ Item {
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Short break"; value: Math.round((root.ovSettings.shortBreakSec || 300) / 60) + "m"; onDecrease: root.stepDuration("shortBreakSec", -1, 1, 25); onIncrease: root.stepDuration("shortBreakSec", 1, 1, 25) }
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Long break"; value: Math.round((root.ovSettings.longBreakSec || 900) / 60) + "m"; onDecrease: root.stepDuration("longBreakSec", -1, 1, 60); onIncrease: root.stepDuration("longBreakSec", 1, 1, 60) }
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Long break every"; value: String(root.ovSettings.longBreakInterval || 4); onDecrease: root.stepDuration("longBreakInterval", -1, 1, 12); onIncrease: root.stepDuration("longBreakInterval", 1, 1, 12) }
-                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Auto-start"; description: "Breaks + work chained"; checked: root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork; onClicked: { var v = !(root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork); root.call("set", { key: "autoStartBreaks", value: v }); root.call("set", { key: "autoStartWork", value: v }) } }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Auto-start"; description: "Breaks + work chained"; checked: root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork; onClicked: { var v = !(root.ovSettings.autoStartBreaks && root.ovSettings.autoStartWork); root.applySetting("autoStartBreaks", v); root.applySetting("autoStartWork", v) } }
                 }
                 Text { text: "Audio"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true; font.letterSpacing: 1 }
                 Grid {
@@ -1342,9 +1303,9 @@ Item {
                   columns: 2
                   columnSpacing: Style.space(12)
                   rowSpacing: Style.space(4)
-                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Tick sound"; description: "Tick every second"; checked: root.ovSettings.tickEnabled === true; onClicked: root.call("set", { key: "tickEnabled", value: !(root.ovSettings.tickEnabled === true) }) }
-                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Alarm sound"; description: "Chime on phase end"; checked: root.ovSettings.alarmEnabled !== false; onClicked: root.call("set", { key: "alarmEnabled", value: !(root.ovSettings.alarmEnabled !== false) }) }
-                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Mute all"; description: "Bell / M key"; checked: root.ovSettings.soundMuted === true; onClicked: root.call("mute") }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Tick sound"; description: "Tick every second"; checked: root.ovSettings.tickEnabled === true; onClicked: root.applySetting("tickEnabled", !(root.ovSettings.tickEnabled === true)) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Alarm sound"; description: "Chime on phase end"; checked: root.ovSettings.alarmEnabled !== false; onClicked: root.applySetting("alarmEnabled", !(root.ovSettings.alarmEnabled !== false)) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Mute all"; description: "Bell / M key"; checked: root.ovSettings.soundMuted === true; onClicked: root.toggleMute() }
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Tick volume"; value: Math.round((root.ovSettings.tickVolume ?? 0.3) * 100) + "%"; onDecrease: root.stepVolume("tickVolume", -0.05); onIncrease: root.stepVolume("tickVolume", 0.05) }
                   OvStepper { width: (parent.width - parent.columnSpacing) / 2; label: "Alarm volume"; value: Math.round((root.ovSettings.alarmVolume ?? 0.5) * 100) + "%"; onDecrease: root.stepVolume("alarmVolume", -0.05); onIncrease: root.stepVolume("alarmVolume", 0.05) }
                 }
@@ -1356,19 +1317,19 @@ Item {
                   rowSpacing: Style.space(4)
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "To-Do view"; description: "Todo section enabled"; checked: root.ovSettings.todoEnabled !== false; onClicked: root.applySetting("todoEnabled", !(root.ovSettings.todoEnabled !== false)) }
                   OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Kanban view"; description: "Board section enabled"; checked: root.ovSettings.kanbanEnabled !== false; onClicked: root.applySetting("kanbanEnabled", !(root.ovSettings.kanbanEnabled !== false)) }
-                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Show pomodoros"; description: "🍅 on cards"; checked: root.ovSettings.showPomodoros !== false; onClicked: root.call("set", { key: "showPomodoros", value: !(root.ovSettings.showPomodoros !== false) }) }
-                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Notifications"; description: "Desktop on phase end"; checked: root.ovSettings.notificationsEnabled !== false; onClicked: root.call("set", { key: "notificationsEnabled", value: !(root.ovSettings.notificationsEnabled !== false) }) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Show pomodoros"; description: "🍅 on cards"; checked: root.ovSettings.showPomodoros !== false; onClicked: root.applySetting("showPomodoros", !(root.ovSettings.showPomodoros !== false)) }
+                  OvToggle { width: (parent.width - parent.columnSpacing) / 2; label: "Notifications"; description: "Desktop on phase end"; checked: root.ovSettings.notificationsEnabled !== false; onClicked: root.applySetting("notificationsEnabled", !(root.ovSettings.notificationsEnabled !== false)) }
                 }
                 Text { text: "Vault sync"; color: root.dimText; font.family: Style.font.family; font.pixelSize: Style.font.bodySmall; font.bold: true; font.letterSpacing: 1 }
-                OvToggle { width: parent.width; label: "Notes export"; description: root.ovSettings.obsidianEnabled ? (root.ovSettings.obsidianVaultPath || "no path set") : "Obsidian / any notes app, on approve"; checked: root.ovSettings.obsidianEnabled === true; onClicked: root.call("set", { key: "obsidianEnabled", value: !(root.ovSettings.obsidianEnabled === true) }) }
+                OvToggle { width: parent.width; label: "Notes export"; description: root.ovSettings.obsidianEnabled ? (root.ovSettings.obsidianVaultPath || "no path set") : "Obsidian / any notes app, on approve"; checked: root.ovSettings.obsidianEnabled === true; onClicked: root.applySetting("obsidianEnabled", !(root.ovSettings.obsidianEnabled === true)) }
                 TextField {
                   id: notesPath
                   width: parent.width
                   visible: root.ovSettings.obsidianEnabled === true
                   placeholderText: "Notes folder e.g. ~/Documents/notes"
                   text: root.ovSettings.obsidianVaultPath || ""
-                  onAccepted: root.call("set", { key: "obsidianVaultPath", value: text.trim().slice(0, 500) })
-                  onEditingFinished: root.call("set", { key: "obsidianVaultPath", value: text.trim().slice(0, 500) })
+                  onAccepted: root.applySetting("obsidianVaultPath", text.trim().slice(0, 500))
+                  onEditingFinished: root.applySetting("obsidianVaultPath", text.trim().slice(0, 500))
                 }
                 Text {
                   visible: root.ovSettings.obsidianEnabled === true
@@ -1386,7 +1347,7 @@ Item {
                   foreground: Color.accent
                   selected: true
                   enabled: root.profilePendingPush > 0 && !!root.ovSettings.obsidianVaultPath
-                  onClicked: root.call("pushAll")
+                  onClicked: root.pushAllDoneToObsidian()
                 }
               }
             }
@@ -1400,7 +1361,7 @@ Item {
     var cur = root.ovSettings[key]
     if (cur === undefined || cur === null) cur = 0.3
     var next = Math.round((cur + delta) * 20) / 20
-    root.call("set", { key: key, value: Math.max(0, Math.min(1, next)) })
+    root.applySetting(key, Math.max(0, Math.min(1, next)))
   }
 
   // Delete flows — same contract as the popup (plain confirm vs Done choice)
@@ -1527,7 +1488,7 @@ Item {
       ? (root.ovSettings.longBreakInterval || 4)
       : Math.round((root.ovSettings[key] || 1500) / 60)
     var next = Math.max(min, Math.min(max, cur + delta))
-    root.call("set", { key: key, value: key === "longBreakInterval" ? next : next * 60 })
+    root.applySetting(key, key === "longBreakInterval" ? next : next * 60)
   }
 
   function cycleView(dir) {

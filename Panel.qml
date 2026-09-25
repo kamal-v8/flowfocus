@@ -315,14 +315,13 @@ Panel {
         }
 
         // Four-way view switcher — Focus | Board | Todo | Setup
-        Rectangle {
+        BorderSurface {
           id: viewSegBox4
           width: parent.width
           height: viewSegRow4.implicitHeight + Style.space(6)
           radius: height / 2
           color: "transparent"
-          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.22)
-          border.width: 1
+          borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
           Row {
             id: viewSegRow4
             anchors.centerIn: parent
@@ -909,15 +908,14 @@ Panel {
             onEditingFinished: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
           }
           // Path card — resolved destination for the active space + copy.
-          Rectangle {
+          BorderSurface {
             id: pathCard
             visible: !!root.ffSettings.obsidianVaultPath
             width: parent.width
             height: pathCardRow.implicitHeight + Style.space(12)
             radius: Style.cornerRadius
             color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.05)
-            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.20)
-            border.width: 1
+            borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
             Row {
               id: pathCardRow
               anchors.fill: parent
@@ -1434,13 +1432,12 @@ Panel {
                 // colInner anchors.fill needs a concrete parent height.
                 height: colInner.implicitHeight + Style.space(12)
 
-                // Shaded column container — theme-safe foreground wash
-                Rectangle {
+                // Shaded column container — theme border spec like other plugins
+                BorderSurface {
                   anchors.fill: parent
                   radius: Style.cornerRadius
                   color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.045)
-                  border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
-                  border.width: 1
+                  borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                 }
 
                 Column {
@@ -1498,7 +1495,7 @@ Panel {
                     Repeater {
                       model: Model.tasksByColumn(root.state, colId).filter(root.taskMatches)
 
-                  delegate: Rectangle {
+                  delegate: BorderSurface {
                     id: kanbanCard
                     required property var modelData
                     property var task: modelData
@@ -1508,8 +1505,7 @@ Panel {
                     radius: Style.cornerRadius
                     clip: true
                     color: task.id === root.timer.activeTaskId ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.14) : Qt.rgba(Color.popups.background.r, Color.popups.background.g, Color.popups.background.b, 0.04)
-                    border.color: task.id === root.timer.activeTaskId ? Color.accent : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.20)
-                    border.width: task.id === root.timer.activeTaskId ? 1.5 : 1
+                    borderSpec: task.id === root.timer.activeTaskId ? Border.flat(Color.accent, 1.5) : Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
                     HoverHandler { id: kanbanHover; onHoveredChanged: kanbanCard.isHovered = hovered }
 
                     // Left accent for active task — stable, not floating
