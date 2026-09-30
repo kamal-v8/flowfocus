@@ -184,7 +184,7 @@ Panel {
     owner: root.barIdentity
     bar: root.bar
     open: root.opened
-    centerOnBar: true
+    centerOnBar: false
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(root.panelWidth)
     contentHeight: panel.fittedContentHeight(content.implicitHeight)
@@ -1220,12 +1220,12 @@ Panel {
           interactive: true
           clip: true
           boundsBehavior: Flickable.StopAtBounds
-          model: Model.tasksForProfile(root.state, root.activeProfileId).filter(root.taskMatches).sort(function(a, b){ return ((a.done ? 1 : 0) - (b.done ? 1 : 0)) || ((a.createdAt || 0) - (b.createdAt || 0)) })
+          model: root.todoTasks()
           section.property: "done"
           section.criteria: ViewSection.FullString
           section.delegate: Text {
             width: plainList.width
-            text: section === "true" ? ("Completed · " + root.profileDoneCount) : ("Open · " + (root.profileTasks.length - root.profileDoneCount))
+            text: section === "true" ? ("Completed · " + root.profileDoneCount) : ("Open · " + root.todoOpenCount())
             color: root.dimText
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
@@ -1733,6 +1733,17 @@ Panel {
       }
     }
 
+      // Empty Todo hint — backlog excluded from the list above
+      Text {
+        visible: root.view === "todo" && root.todoTasks().length === 0 && Model.tasksForProfile(root.state, root.activeProfileId).filter(function(t){ return t.column === "backlog" }).length > 0
+        width: parent.width
+        text: "No actionable tasks — park long-term items in Backlog"
+        color: root.dimText
+        font.family: Style.font.family
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+
     }
 
     // Confirm dialogs — MUST be direct children of KeyboardPanel (same
@@ -2077,6 +2088,15 @@ Panel {
     var q = root.searchText.trim().toLowerCase()
     if (!q || !task) return true
     return (task.text || "").toLowerCase().indexOf(q) !== -1
+  }
+
+  // To-Do list source — excludes backlog (long-term parking). Kanban keeps all columns.
+  function todoTasks() {
+    return Model.tasksForProfile(root.state, root.activeProfileId).filter(function(t){ return t.column !== "backlog" && root.taskMatches(t) }).sort(function(a, b){ return ((a.done ? 1 : 0) - (b.done ? 1 : 0)) || ((a.createdAt || 0) - (b.createdAt || 0)) })
+  }
+
+  function todoOpenCount() {
+    return root.todoTasks().filter(function(t){ return !t.done }).length
   }
 
   function toggleSettings() {
