@@ -277,6 +277,15 @@ Item {
     return (task.text || "").toLowerCase().indexOf(q) !== -1
   }
 
+  // To-Do list source — excludes backlog (long-term parking). Kanban keeps all columns.
+  function todoTasks() {
+    return root.profileTasks.filter(function(t){ return t.column !== "backlog" && root.taskMatches(t) }).slice().sort(function(a, b){ return ((a.done ? 1 : 0) - (b.done ? 1 : 0)) || ((a.createdAt || 0) - (b.createdAt || 0)) })
+  }
+
+  function todoOpenCount() {
+    return root.todoTasks().filter(function(t){ return !t.done }).length
+  }
+
   function cycleTaskColumn(task) {
     var cols = Model.COLUMNS
     var idx = cols.indexOf(task.column)
@@ -440,16 +449,15 @@ Item {
       }
     }
 
-    // Compact workspace card — floats above the bar, not fullscreen-center.
+    // Compact workspace card — centered like other Omarchy overlays,
+    // never docked to a screen edge (bar position varies per setup).
     // BorderSurface + theme border spec so it matches other Omarchy surfaces.
     BorderSurface {
       id: card
       visible: root.opened
       width: Math.min(parent.width - 80, 980)
       height: Math.min(parent.height - 140, 620)
-      anchors.horizontalCenter: parent.horizontalCenter
-      anchors.bottom: parent.bottom
-      anchors.bottomMargin: 56
+      anchors.centerIn: parent
       radius: Style.cornerRadius
       color: Color.background
       borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
@@ -1177,12 +1185,12 @@ Item {
                 clip: true
                 spacing: Style.space(6)
                 boundsBehavior: Flickable.StopAtBounds
-                model: root.profileTasks.filter(root.taskMatches).slice().sort(function(a, b){ return ((a.done ? 1 : 0) - (b.done ? 1 : 0)) || ((a.createdAt || 0) - (b.createdAt || 0)) })
+                model: root.todoTasks()
                 section.property: "done"
                 section.criteria: ViewSection.FullString
                 section.delegate: Text {
                   width: todoList.width
-                  text: section === "true" ? ("Completed · " + root.profileDoneCount) : ("Open · " + (root.profileTasks.length - root.profileDoneCount))
+                  text: section === "true" ? ("Completed · " + root.profileDoneCount) : ("Open · " + root.todoOpenCount())
                   color: root.dimText
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
@@ -1260,6 +1268,20 @@ Item {
                   }
                 }
               }
+            }
+
+            // Empty Todo hint — backlog excluded from the list above
+            Text {
+              visible: root.view === "todo" && root.todoTasks().length === 0 && root.profileTasks.filter(function(t){ return t.column === "backlog" }).length > 0
+              text: "No actionable tasks — park long-term items in Backlog"
+              color: root.dimText
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+              width: Math.min(parent.width - 32, 420)
+              horizontalAlignment: Text.AlignHCenter
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.verticalCenter: parent.verticalCenter
             }
 
             // ---- Setup view ----

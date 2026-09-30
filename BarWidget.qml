@@ -60,9 +60,12 @@ BarWidget {
     atomicWrites: false
     printErrors: false
     onLoaded: {
-      root.state = Model.parse(text())
+      // Never resume into running at load: freeze where the user stopped so
+      // a reboot can't fire a stale alarm or autostart a phase unattended.
+      root.state = Model.settleLoadedTimer(Model.parse(text()))
       root.loaded = true
       root.syncSettingsFromShellJson()
+      root.saveState()
       root.applyTickState()
     }
     onTextChanged: {

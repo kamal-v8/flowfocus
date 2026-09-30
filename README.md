@@ -58,7 +58,7 @@ Setup view (overlay `S`, popup gear):
 
 ![FocusFlow Setup](assets/settings.png)
 
-State lives in `~/.local/state/omarchy/focusflow.json`. Replace `sounds/*.ogg|wav` in place + `omarchy restart shell` for custom audio.
+State lives in `~/.local/state/omarchy/focusflow.json`. A reboot/shell restart always resumes paused (never auto-starts, never fires a stale alarm). Replace `sounds/*.ogg|wav` in place + `omarchy restart shell` for custom audio.
 
 ## Remove
 
