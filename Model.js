@@ -319,17 +319,21 @@ function resetTimer(state) {
   return state
 }
 
-// Freeze a running timer at shell load: a reboot/restart must never resume
-// into running, fire a stale alarm, or trigger autostart for a phase whose
-// deadline passed while away. Preserves the last-saved remainingSec so the
-// user resumes exactly where they stopped. Idempotent.
+// Freeze a timer at shell load ONLY if its deadline already passed while
+// away (reboot/sleep with a running timer): pausing avoids firing a stale
+// alarm and autostarting a phase unattended, preserving remainingSec so the
+// user resumes where they stopped. A still-valid (future) deadline is left
+// running — this must be a no-op for ordinary Loader rebuilds/hot-reloads,
+// otherwise every rescan would murder an active timer. Idempotent.
 function settleLoadedTimer(state) {
   var t = state.timer
   if (t && t.status === STATUS_RUNNING) {
-    t.status = STATUS_PAUSED
-    t.deadlineMs = 0
-    if (typeof t.remainingSec !== "number" || t.remainingSec < 0)
-      t.remainingSec = phaseDurationSec(t.phase, state.settings)
+    if (!t.deadlineMs || t.deadlineMs <= nowMs()) {
+      t.status = STATUS_PAUSED
+      t.deadlineMs = 0
+      if (typeof t.remainingSec !== "number" || t.remainingSec < 0)
+        t.remainingSec = phaseDurationSec(t.phase, state.settings)
+    }
   }
   return state
 }
