@@ -740,6 +740,9 @@ Panel {
       // ---- Settings section — scrolls when taller than the panel ----
       Flickable {
         visible: root.view === "settings"
+        // Re-snapshot the path field on open (covers external edits) — but
+        // never while the user is typing in it.
+        onVisibleChanged: if (visible && !vaultPathField.activeFocus) vaultPathField.text = root.ffSettings.obsidianVaultPath || ""
         width: parent.width
         height: Math.min(setCol.implicitHeight, Style.space(420))
         contentHeight: setCol.implicitHeight
@@ -901,11 +904,14 @@ Panel {
           spacing: Style.space(2)
           visible: root.ffSettings.obsidianEnabled === true
           TextField {
+            id: vaultPathField
             width: parent.width
               placeholderText: "Notes folder e.g. ~/Documents/notes — saves to <folder>/focusflow/<Space>.md"
-            text: root.ffSettings.obsidianVaultPath || ""
-            onAccepted: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
-            onEditingFinished: { root.ff.state.settings.obsidianVaultPath = text.trim().slice(0,500); root.ff.saveState(); root.ff.applyTickState() }
+            // Snapshot, not a live binding: the tick refreshes state every
+            // second while running, which would revert each keystroke/paste.
+            Component.onCompleted: vaultPathField.text = root.ffSettings.obsidianVaultPath || ""
+            onAccepted: root.commitVaultPath()
+            onEditingFinished: root.commitVaultPath()
           }
           // Path card — resolved destination for the active space + copy.
           BorderSurface {
@@ -2065,6 +2071,19 @@ Panel {
   }
 
   readonly property int enabledViewCount: 2 + (root.viewEnabled("kanban") ? 1 : 0) + (root.viewEnabled("todo") ? 1 : 0)
+
+  // Commit the vault path field (Enter or focus loss). Compared first so
+  // Accept + focus-loss firing together doesn't double-write; dependents
+  // refresh via applyTickState, which can't clobber the field anymore.
+  function commitVaultPath() {
+    if (!root.ff) return
+    var v = vaultPathField.text.trim().slice(0, 500)
+    if (v !== (root.ffSettings.obsidianVaultPath || "")) {
+      root.ff.state.settings.obsidianVaultPath = v
+      root.ff.saveState()
+      root.ff.applyTickState()
+    }
+  }
 
   function setView(v) {
     if (!root.viewEnabled(v)) v = "focus"

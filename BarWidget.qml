@@ -439,7 +439,14 @@ BarWidget {
   function toggleOverlay() {
     var omarchyPath = Quickshell.env("OMARCHY_PATH") || ""
     if (!omarchyPath) return
-    Quickshell.execDetached([omarchyPath + "/bin/omarchy-shell", "shell", "toggle", "flowfocus", "{}"])
+    var payload = "{}"
+    try {
+      var ax = button.mapToItem(button.QsWindow.window.contentItem, 0, 0).x + button.width / 2
+      var bp = (root.bar && root.bar.position) ? root.bar.position : "top"
+      var bh = button.QsWindow.window.height || 0
+      if (isFinite(ax) && isFinite(bh)) payload = JSON.stringify({anchorX: ax, barPos: bp, barH: bh})
+    } catch (e) { payload = "{}" }
+    Quickshell.execDetached([omarchyPath + "/bin/omarchy-shell", "shell", "toggle", "flowfocus", payload])
   }
 
   function injectPanel() {

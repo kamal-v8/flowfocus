@@ -763,6 +763,15 @@ function expandVaultPath(settings, vaultPath) {
   // Bare relative paths (e.g. "Documents/notes") resolve against the shell's
   // cwd, which varies per device — anchor them at $HOME instead.
   else if (vp.charAt(0) !== "/" && home) vp = home + "/" + vp
+  // Tolerate a vault path already pointing inside the focusflow/ subfolder
+  // (every vault consumer appends VAULT_SUBDIR itself): strip ONE trailing
+  // "/focusflow" segment (case-sensitive) so ".../sync" and
+  // ".../sync/focusflow" resolve identically. Any other trailing folder name
+  // is left untouched. Fixed here rather than in obsidianFilePathForProfile
+  // so all callers (append/remove/migrate, legacy lookup, UI labels) agree
+  // on one root.
+  var noSlash = vp.replace(/\/+$/, "")
+  if (noSlash.endsWith("/" + VAULT_SUBDIR)) vp = noSlash.slice(0, -(VAULT_SUBDIR.length + 1)) || "/"
   return vp
 }
 
@@ -780,6 +789,47 @@ function obsidianFilePathForProfile(settings, vaultPath, profileId, profileName)
   if (!vp) return ""
   var dir = vp.endsWith("/") ? vp + VAULT_SUBDIR : vp + "/" + VAULT_SUBDIR
   return dir + "/" + profileFileName(profileId, profileName)
+}
+
+function parseVaultDateMs(datePart, timePart) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(datePart || ""))
+  var t = /^(\d{2}):(\d{2})$/.exec(String(timePart || ""))
+  if (!m || !t) return 0
+  var y = +m[1], mo = +m[2], d = +m[3], h = +t[1], mi = +t[2]
+  if (mo < 1 || mo > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return 0
+  var ms = new Date(y, mo - 1, d, h, mi, 0, 0).getTime()
+  return isFinite(ms) ? ms : 0
+}
+
+// Pure parser for vault task lines written by appendTaskToVault:
+//   - [ ] text [To Do] — 2026-09-24 13:30 <!-- ff-abc123-def456 -->
+// Returns { tasks: [{id, text, done, columnId, createdAtMs}], skippedNoId }.
+// Lines without a valid <!-- id --> tag (including garbage/header lines)
+// are skipped and counted in skippedNoId; blank lines are ignored.
+// Column labels reverse-map via COLUMNS/COLUMN_LABELS (unknown -> todo),
+// unparseable dates fall back to Date.now(), text caps at 200 chars.
+function parseVaultLines(text) {
+  var tasks = []
+  var skippedNoId = 0
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i]
+    if (!line || !line.trim()) continue
+    var lm = /^\s*-\s*\[([ xX])\]\s*(.*?)\s*\[([^\]]*)\]\s*[—–-]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s*<!--\s*([A-Za-z0-9_-]+)\s*-->\s*$/.exec(line)
+    if (!lm) { skippedNoId++; continue }
+    var body = String(lm[2] || "").trim().slice(0, 200)
+    if (!body) { skippedNoId++; continue }
+    var labelKey = String(lm[3] || "").trim().toLowerCase()
+    var col = "todo"
+    for (var c = 0; c < COLUMNS.length; c++) {
+      var cid = COLUMNS[c]
+      if (labelKey === String(COLUMN_LABELS[cid] || cid).toLowerCase() || labelKey === cid) { col = cid; break }
+    }
+    var ms = parseVaultDateMs(lm[4], lm[5])
+    if (!ms) ms = Date.now()
+    tasks.push({ id: lm[6], text: body, done: (lm[1] === "x" || lm[1] === "X"), columnId: col, createdAtMs: ms })
+  }
+  return { tasks: tasks, skippedNoId: skippedNoId }
 }
 
 // Legacy locations from before v1.5 (base file + per-space subfolders).
@@ -939,10 +989,13 @@ if (typeof module !== "undefined") {
     sendNotification: sendNotification,
     sanitizeVaultPath: sanitizeVaultPath,
     sanitizeProfileNameForPath: sanitizeProfileNameForPath,
+    expandVaultPath: expandVaultPath,
+    profileFileName: profileFileName,
     obsidianFilePathForProfile: obsidianFilePathForProfile,
     obsidianLegacyFile: obsidianLegacyFile,
     migrateProfileVaultFile: migrateProfileVaultFile,
     appendTaskToVault: appendTaskToVault,
+    parseVaultLines: parseVaultLines,
     markTaskPushed: markTaskPushed,
     clearTaskPushed: clearTaskPushed,
     removeTaskFromVault: removeTaskFromVault
