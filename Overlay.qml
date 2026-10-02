@@ -15,6 +15,12 @@ Item {
 
   property bool opened: false
   property string view: "focus"
+  property real anchorX: -1
+  property string barPos: ""
+  property real anchorBarH: 0
+  // Keybind path has no widget position: pin under the top bar ( bar ~36px
+  // + gap) instead of floating mid-screen. Matches calendar-style popups.
+  readonly property real topFallbackY: 36 + Style.gapsOut * 2
   property string searchText: ""
   property string newTaskText: ""
 
@@ -45,6 +51,17 @@ Item {
   readonly property int profileDoneCount: profileTasks.filter(function(t){ return t.done }).length
   readonly property int profileFocusedCount: profileTasks.reduce(function(a, t){ return a + (t.pomodorosSpent || 0) }, 0)
   readonly property int profilePendingPush: profileTasks.filter(function(t){ return !t.pushedToObsidian || t.pushedColumn !== t.column }).length
+  // Vault-import run state (sequential per-file FileView queue below)
+  property string vaultImportStatus: ""
+  property bool vaultImporting: false
+  property var vaultImportQueue: []
+  property var vaultImportCurrent: null
+  property string vaultImportExpected: ""
+  property int vaultImportIdx: 0
+  property int vaultImportNew: 0
+  property int vaultImportDup: 0
+  property int vaultImportSkipped: 0
+  property var vaultImportPending: []
   readonly property color dimText: Qt.darker(Color.foreground, 1.4)
   readonly property var activeTask: {
     var id = timer.activeTaskId
@@ -79,6 +96,34 @@ Item {
     onFileChanged: reload()
   }
 
+  // Vault-import reader — FileView is the only file-read mechanism
+  // (execDetached is fire-and-forget with no stdout). One shared reader walks
+  // the per-space queue sequentially: path assignment triggers the load,
+  // onLoaded parses + advances, and the watchdog skips files that never load
+  // (e.g. missing) so the queue can't stall. No watching: vault files change
+  // under us while importing.
+  FileView {
+    id: vaultImportFile
+    watchChanges: false
+    printErrors: false
+    onLoaded: root.vaultImportFileLoaded(text())
+  }
+
+  // Guards a missing/unreadable vault file: FileView may never emit onLoaded
+  // for it, so advance the queue instead of stalling mid-import.
+  Timer {
+    id: vaultImportWatchdog
+    interval: 2500
+    repeat: false
+    running: false
+    onTriggered: {
+      if (!root.vaultImporting) return
+      root.vaultImportExpected = ""
+      root.vaultImportIdx++
+      root.vaultImportNext()
+    }
+  }
+
   // Display poll — recovery if an inotify event is ever missed: reload, and
   // adoption happens uniformly in onTextChanged above.
   Timer {
@@ -102,6 +147,14 @@ Item {
     ovSave()
     if (!root.viewEnabled(root.view)) root.view = "focus"
     root.state = JSON.parse(JSON.stringify(root.state))
+  }
+
+  // Commit the notes path field (Enter or focus loss). Compared first so
+  // Accept + focus-loss firing together doesn't double-write.
+  function commitNotesPath() {
+    var v = notesPath.text.trim().slice(0, 500)
+    if (v !== (root.ovSettings.obsidianVaultPath || ""))
+      root.applySetting("obsidianVaultPath", v)
   }
 
   function toggleTimer() {
@@ -242,7 +295,101 @@ Item {
     ovApply()
   }
 
-  // Whitelisted absolute setting write (mirrors the bar's applySetting)
+  // ---- Vault import (reads <vault>/focusflow/<Space>.md back into tasks)
+  function startVaultImport() {
+    if (root.vaultImporting) return
+    if (root.ovSettings.obsidianEnabled !== true) return
+    if (Model.expandVaultPath(root.ovSettings, undefined) === "") {
+      root.vaultImportStatus = "Set a vault path first"
+      return
+    }
+    var q = []
+    var profiles = root.state.kanbanProfiles || []
+    for (var i = 0; i < profiles.length; i++) {
+      var f = Model.obsidianFilePathForProfile(root.ovSettings, root.ovSettings.obsidianVaultPath, profiles[i].id, profiles[i].name)
+      if (f) q.push({ profileId: profiles[i].id, file: f })
+    }
+    if (q.length === 0) {
+      root.vaultImportStatus = "No spaces to import"
+      return
+    }
+    root.vaultImportQueue = q
+    root.vaultImportIdx = 0
+    root.vaultImportNew = 0
+    root.vaultImportDup = 0
+    root.vaultImportSkipped = 0
+    root.vaultImportPending = []
+    root.vaultImporting = true
+    root.vaultImportStatus = "Importing…"
+    root.vaultImportNext()
+  }
+
+  function vaultImportNext() {
+    if (root.vaultImportIdx >= root.vaultImportQueue.length) {
+      root.vaultImportFinish()
+      return
+    }
+    var item = root.vaultImportQueue[root.vaultImportIdx]
+    root.vaultImportCurrent = item
+    root.vaultImportExpected = item.file
+    root.vaultImportStatus = "Importing… (" + (root.vaultImportIdx + 1) + "/" + root.vaultImportQueue.length + ")"
+    // Path assignment triggers the load; same-path reuse needs reload().
+    // Never both — a double load would parse one file twice.
+    if (vaultImportFile.path === item.file) vaultImportFile.reload()
+    else vaultImportFile.path = item.file
+    vaultImportWatchdog.restart()
+  }
+
+  function vaultImportFileLoaded(content) {
+    if (!root.vaultImporting) return
+    if (!root.vaultImportExpected) return
+    if (vaultImportFile.path !== root.vaultImportExpected) return
+    root.vaultImportExpected = ""
+    vaultImportWatchdog.stop()
+    var item = root.vaultImportCurrent
+    try {
+      var r = Model.parseVaultLines(content)
+      var existing = {}
+      for (var e = 0; e < root.state.tasks.length; e++) existing[root.state.tasks[e].id] = true
+      for (var p = 0; p < root.vaultImportPending.length; p++) existing[root.vaultImportPending[p].id] = true
+      for (var k = 0; k < r.tasks.length; k++) {
+        var t = r.tasks[k]
+        if (existing[t.id]) { root.vaultImportDup++; continue }
+        existing[t.id] = true
+        if (root.state.tasks.length + root.vaultImportPending.length >= 200) continue
+        root.vaultImportPending.push({
+          id: t.id,
+          text: t.text,
+          column: t.columnId,
+          done: t.done,
+          profileId: item ? item.profileId : "default",
+          pomodorosSpent: 0,
+          pomodorosEstimated: 1,
+          pushedToObsidian: true,
+          pushedAt: new Date().toISOString(),
+          pushedColumn: t.columnId,
+          createdAt: new Date(t.createdAtMs).toISOString()
+        })
+        root.vaultImportNew++
+      }
+      root.vaultImportSkipped += r.skippedNoId
+    } catch (e) {}
+    root.vaultImportIdx++
+    root.vaultImportNext()
+  }
+
+  function vaultImportFinish() {
+    vaultImportWatchdog.stop()
+    root.vaultImporting = false
+    root.vaultImportExpected = ""
+    if (root.vaultImportPending.length > 0) {
+      for (var i = 0; i < root.vaultImportPending.length; i++)
+        root.state.tasks.push(root.vaultImportPending[i])
+      root.vaultImportPending = []
+      root.ovApply()
+    }
+    root.vaultImportStatus = "Imported " + root.vaultImportNew + " · " + root.vaultImportDup + " already present · " + root.vaultImportSkipped + " skipped (no id)"
+  }
   function applySetting(key, value) {
     var s = root.state.settings
     var ints = ["workSec", "shortBreakSec", "longBreakSec", "longBreakInterval"]
@@ -306,6 +453,9 @@ Item {
       if (payload) {
         var args = JSON.parse(payload) || {}
         if (typeof args.view === "string" && ["focus", "kanban", "todo", "settings"].indexOf(args.view) !== -1) root.setView(args.view)
+        if (typeof args.anchorX === "number" && isFinite(args.anchorX) && args.anchorX >= 0) root.anchorX = args.anchorX
+        if (typeof args.barPos === "string" && ["top", "bottom", "left", "right"].indexOf(args.barPos) !== -1) root.barPos = args.barPos
+        if (typeof args.barH === "number" && isFinite(args.barH) && args.barH >= 0) root.anchorBarH = args.barH
       }
     } catch (e) {}
     try { root.state = Model.parse(stateFile.text()) } catch (e) {}
@@ -316,6 +466,9 @@ Item {
 
   function close() {
     root.opened = false
+    root.anchorX = -1
+    root.barPos = ""
+    root.anchorBarH = 0
   }
 
   // ---- Window ----
@@ -347,7 +500,6 @@ Item {
       id: keyGrab
       anchors.fill: parent
       focus: root.opened
-      Keys.onEscapePressed: root.close()
       Keys.onSpacePressed: function(event) { if (root.typing) return; root.toggleTimer(); event.accepted = true }
       Keys.onPressed: function(event) {
         if (root.typing || root.delDoneOpen || confirmDeleteTask.opened) return
@@ -375,6 +527,12 @@ Item {
         context: Qt.ApplicationShortcut
         enabled: root.opened && !root.typing
         onActivated: root.cycleProfile(1)
+      }
+      Shortcut {
+        sequence: "Escape"
+        context: Qt.ApplicationShortcut
+        enabled: root.opened
+        onActivated: root.handleEscape()
       }
     }
 
@@ -449,15 +607,18 @@ Item {
       }
     }
 
-    // Compact workspace card — centered like other Omarchy overlays,
-    // never docked to a screen edge (bar position varies per setup).
-    // BorderSurface + theme border spec so it matches other Omarchy surfaces.
+    // Compact workspace card — pinned below the top bar like other Omarchy
+    // popups (calendar etc.), never floating mid-screen. With an anchor
+    // payload (bar click) it centers on the widget; otherwise (keybind) it
+    // centers horizontally. BorderSurface + theme border spec so it matches
+    // other Omarchy surfaces.
     BorderSurface {
       id: card
       visible: root.opened
       width: Math.min(parent.width - 80, 980)
       height: Math.min(parent.height - 140, 620)
-      anchors.centerIn: parent
+      x: root.anchorX < 0 ? (parent.width - width) / 2 : Math.max(Style.gapsOut, Math.min(root.anchorX - width / 2, parent.width - width - Style.gapsOut))
+      y: root.anchorX < 0 ? root.topFallbackY : ((root.barPos === "top" || root.barPos === "") ? root.anchorBarH + Style.gapsOut : parent.height - root.anchorBarH - Style.gapsOut - height)
       radius: Style.cornerRadius
       color: Color.background
       borderSpec: Border.localOrSurfaceSpec("popups", "border", Color.popups.border, Color.popups.border, 1)
@@ -1287,6 +1448,8 @@ Item {
             // ---- Setup view ----
             Flickable {
               visible: root.view === "settings"
+              // Re-snapshot the path field on open — never while typing in it.
+              onVisibleChanged: if (visible && !notesPath.activeFocus) notesPath.text = root.ovSettings.obsidianVaultPath || ""
               anchors.fill: parent
               contentHeight: setupCol.implicitHeight
               contentWidth: width
@@ -1339,9 +1502,10 @@ Item {
                   width: parent.width
                   visible: root.ovSettings.obsidianEnabled === true
                   placeholderText: "Notes folder e.g. ~/Documents/notes"
-                  text: root.ovSettings.obsidianVaultPath || ""
-                  onAccepted: root.applySetting("obsidianVaultPath", text.trim().slice(0, 500))
-                  onEditingFinished: root.applySetting("obsidianVaultPath", text.trim().slice(0, 500))
+                  // Snapshot, not a live binding (see Panel.qml vaultPathField).
+                  Component.onCompleted: notesPath.text = root.ovSettings.obsidianVaultPath || ""
+                  onAccepted: root.commitNotesPath()
+                  onEditingFinished: root.commitNotesPath()
                 }
                 Text {
                   visible: root.ovSettings.obsidianEnabled === true
@@ -1360,6 +1524,24 @@ Item {
                   selected: true
                   enabled: root.profilePendingPush > 0 && !!root.ovSettings.obsidianVaultPath
                   onClicked: root.pushAllDoneToObsidian()
+                }
+                Button {
+                  visible: root.ovSettings.obsidianEnabled === true
+                  width: parent.width
+                  text: root.vaultImporting ? "Importing…" : "Import from vault"
+                  foreground: Color.accent
+                  selected: true
+                  enabled: !root.vaultImporting && !!root.ovSettings.obsidianVaultPath
+                  onClicked: root.startVaultImport()
+                }
+                Text {
+                  visible: root.ovSettings.obsidianEnabled === true && root.vaultImportStatus !== ""
+                  width: parent.width
+                  wrapMode: Text.Wrap
+                  text: root.vaultImportStatus
+                  color: root.dimText
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
                 }
               }
             }
@@ -1399,6 +1581,13 @@ Item {
     root.delDoneOpen = false
     root.delTaskId = ""
     root.delTaskText = ""
+  }
+
+  function handleEscape() {
+    if (root.delDoneOpen) { root.closeDeleteDone(); return }
+    if (confirmDeleteTask.opened) { confirmDeleteTask.opened = false; root.delTaskId = ""; root.delTaskText = ""; return }
+    if (root.typing) { keyGrab.forceActiveFocus(); return }
+    root.close()
   }
 
   // Compact toggle row (Setup view) — kit ToggleSwitch, theme tokens
